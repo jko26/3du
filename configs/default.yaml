@@ -1,0 +1,12 @@
+fps: 5.0
+frame_width: 640
+window_seconds: 2.0
+pixel_p_thre: 0.5
+pixel_frac_thre: 0.4
+frame_frac_thre: 0.4
+min_visible_in_window: 3
+ego_floor_px: 3.0
+max_points: 400000
+conf_threshold_coef: 0.75
+da3_hf_repo: depth-anything/DA3NESTED-GIANT-LARGE-1.1
+sam2_checkpoint: sam2.1_hiera_large.pt

@@ -1,0 +1,19 @@
+# HuggingFace shawshankvkt/Walking_Tours (CC-BY). URLs from WTour.txt.
+# Ingest downloads only the first n_chunks * chunk_seconds (default 400s), ≤720p.
+source: https://huggingface.co/datasets/shawshankvkt/Walking_Tours
+license: CC-BY
+chunk_seconds: 20
+n_chunks: 20
+max_height: 720
+default_city: amsterdam
+cities:
+  amsterdam: https://www.youtube.com/watch?v=E07rTPgIvn0
+  bangkok: https://www.youtube.com/watch?v=hUGcHvN4mME
+  chiang_mai: https://www.youtube.com/watch?v=jyxIRzlkO_g
+  istanbul: https://www.youtube.com/watch?v=mA9lYWyXMYU
+  kuala_lumpur: https://www.youtube.com/watch?v=yLTycPjm0nk
+  singapore: https://www.youtube.com/watch?v=aUJl46bEWYo
+  stockholm: https://www.youtube.com/watch?v=Jr9x-RB4E1U
+  wildlife: https://www.youtube.com/watch?v=Q0ML5oAjX_w
+  venice: https://www.youtube.com/watch?v=fGX0Te6pFvk
+  zurich: https://www.youtube.com/watch?v=_NmYvuEILw4

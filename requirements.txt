@@ -1,0 +1,17 @@
+# Core (pip install -e .)
+numpy<2
+opencv-python-headless
+Pillow
+pyyaml
+matplotlib
+huggingface_hub
+safetensors
+einops
+tqdm
+scipy
+yt-dlp
+
+# Install these against the cluster CUDA index BEFORE the rest, e.g.
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# torch
+# torchvision

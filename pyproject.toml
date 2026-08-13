@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cork-3du"
+version = "0.1.0"
+description = "Static 3D reconstruction from walking-tour video: DA3 + residual 2s 40/40 track-lock."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy<2",
+  "opencv-python-headless",
+  "Pillow",
+  "pyyaml",
+  "matplotlib",
+  "huggingface_hub",
+  "safetensors",
+  "einops",
+  "tqdm",
+  "scipy",
+  "yt-dlp",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+3du = "cork3du.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
