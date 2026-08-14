@@ -22,7 +22,7 @@ dependencies = [
   "yt-dlp",
   "imageio-ffmpeg",
   "faiss-cpu",
-  "numba",
+  "numba>=0.59,<0.61",
   "plyfile",
 ]
 
