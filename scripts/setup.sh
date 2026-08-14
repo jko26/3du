@@ -29,7 +29,10 @@ fi
 if [[ ! -d "$CORK3DU_SAM2/.git" ]]; then
   git clone --recursive https://github.com/facebookresearch/sam2.git "$CORK3DU_SAM2"
 fi
-pip install -e "$CORK3DU_SAM2"
+# Login nodes kill isolated torch rebuilds. Use the module torch already in the venv.
+# CUDA custom ops are optional; SAM2 falls back to PyTorch.
+export SAM2_BUILD_CUDA="${SAM2_BUILD_CUDA:-0}"
+pip install -e "$CORK3DU_SAM2" --no-build-isolation
 
 CKPT="$CORK3DU_WEIGHTS/sam2.1_hiera_large.pt"
 if [[ ! -f "$CKPT" ]]; then
