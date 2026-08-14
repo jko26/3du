@@ -55,6 +55,26 @@ def ingest_wtours(
     city_dir.mkdir(parents=True, exist_ok=True)
     src = city_dir / "_source.mp4"
     if not src.is_file():
+        hf_repo = os.environ.get("CORK3DU_HF_WTOURS") or cfg.get("hf_repo")
+        hf_name = f"{key}/_source.mp4"
+        if hf_repo:
+            try:
+                from huggingface_hub import hf_hub_download
+
+                logger.info("HF %s %s → %s", hf_repo, hf_name, src)
+                got = hf_hub_download(
+                    repo_id=str(hf_repo),
+                    filename=hf_name,
+                    repo_type="dataset",
+                    local_dir=str(out_dir),
+                )
+                got_path = Path(got)
+                if got_path.resolve() != src.resolve():
+                    src.parent.mkdir(parents=True, exist_ok=True)
+                    src.write_bytes(got_path.read_bytes())
+            except Exception as e:
+                logger.warning("HF download failed (%s); falling back to yt-dlp", e)
+    if not src.is_file():
         logger.info("yt-dlp %s first %ds ≤%dp → %s", url, total_s, max_height, src)
         fmt = f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b"
         cmd = [

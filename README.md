@@ -32,7 +32,7 @@ bash scripts/make_env.sh
 # later, before wtours20: CUDA torch into that env, then
 bash scripts/setup.sh
 
-sbatch jobs/ingest_wtours.sbatch          # yt-dlp first 400s, 20×20s mp4s
+sbatch jobs/ingest_wtours.sbatch          # HF amsterdam/_source.mp4, then 20×20s splits
 sbatch jobs/wtours20.sbatch               # array 0-19; wait until ingest is done
 ```
 
@@ -50,7 +50,7 @@ $CORK3DU_DATA/scenes/amsterdam_000/
   meta.json
 ```
 
-Data: [Walking Tours](https://huggingface.co/datasets/shawshankvkt/Walking_Tours) (CC-BY YouTube). Ingest does **not** download the full hours-long 4K file.
+Data: [Walking Tours](https://huggingface.co/datasets/shawshankvkt/Walking_Tours) (CC-BY YouTube). The original HF card is URLs only; ingest pulls the pre-cut Amsterdam clip from [jkoooo/3du-wtours](https://huggingface.co/datasets/jkoooo/3du-wtours) (public, no token).
 
 ## CLI
 
