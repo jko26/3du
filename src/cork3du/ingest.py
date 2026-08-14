@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from .ffbin import ffmpeg_bin
 from .paths import code_root
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,7 @@ def ingest_wtours(
         if not dest.is_file():
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
+                    ffmpeg_bin(), "-y",
                     "-ss", str(start),
                     "-t", str(chunk_seconds),
                     "-i", str(src),

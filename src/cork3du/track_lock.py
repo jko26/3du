@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+from .ffbin import ffmpeg_bin
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,7 @@ def write_mask_debug(
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
-            "ffmpeg", "-y", "-framerate", str(fps),
+            ffmpeg_bin(), "-y", "-framerate", str(fps),
             "-i", str(dbg / "%05d.jpg"),
             "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",

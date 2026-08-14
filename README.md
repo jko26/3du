@@ -75,4 +75,4 @@ At 5 fps, a 2s window is 10 frames.
 
 Install **torch / torchvision** against the cluster CUDA wheel index into `$CORK3DU_DATA/env` before `wtours20`. DA3-Giant may OOM at 32G — bump `--mem` on the sbatch header if needed.
 
-Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Create it with `bash scripts/make_env.sh` on a login node. You also need **ffmpeg** (`module load ffmpeg` or equivalent).
+Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Create it with `bash scripts/make_env.sh` on a login node. ffmpeg comes from PATH (`module load ffmpeg`) or the `imageio-ffmpeg` wheel.

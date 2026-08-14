@@ -25,5 +25,11 @@ elif [[ -f "$CORK3DU_ROOT/.venv/bin/activate" ]]; then
 fi
 export PATH="${HOME}/.local/bin:${PATH}"
 
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  if type module >/dev/null 2>&1; then
+    module load ffmpeg 2>/dev/null || true
+  fi
+fi
+
 cd "$CORK3DU_ROOT"
 echo "python=$(command -v python) ($(python -c 'import sys; print(sys.executable)'))"

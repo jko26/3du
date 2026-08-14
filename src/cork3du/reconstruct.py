@@ -14,6 +14,8 @@ import cv2
 import numpy as np
 import yaml
 
+from .ffbin import ffmpeg_bin
+
 logger = logging.getLogger(__name__)
 
 DA3_HF_REPO = "depth-anything/DA3NESTED-GIANT-LARGE-1.1"
@@ -31,7 +33,7 @@ def extract_frames_ffmpeg(
     for old in list(out_dir.glob("frame_*.png")) + list(out_dir.glob("*.jpg")):
         old.unlink()
     pattern = str(out_dir / "frame_%06d.png")
-    cmd = ["ffmpeg", "-y", "-i", str(video_path), "-vf", f"fps={fps},scale={width}:-1", pattern]
+    cmd = [ffmpeg_bin(), "-y", "-i", str(video_path), "-vf", f"fps={fps},scale={width}:-1", pattern]
     logger.info("ffmpeg extract: %s", " ".join(cmd))
     subprocess.run(cmd, check=True, capture_output=True)
     paths = sorted(out_dir.glob("frame_*.png"))

@@ -10,6 +10,7 @@ einops
 tqdm
 scipy
 yt-dlp
+imageio-ffmpeg
 
 # Install these against the cluster CUDA index BEFORE the rest, e.g.
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
