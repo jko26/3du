@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +57,9 @@ def ingest_wtours(
         logger.info("yt-dlp %s first %ds ≤%dp → %s", url, total_s, max_height, src)
         fmt = f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b"
         cmd = [
-            "yt-dlp",
+            sys.executable,
+            "-m",
+            "yt_dlp",
             "-f",
             fmt,
             "--download-sections",
@@ -67,6 +70,13 @@ def ingest_wtours(
             "--no-playlist",
             url,
         ]
+        try:
+            import yt_dlp  # noqa: F401
+        except ImportError as e:
+            raise RuntimeError(
+                "yt-dlp is not installed in this Python. On the cluster run:\n"
+                f"  {sys.executable} -m pip install --user yt-dlp"
+            ) from e
         subprocess.run(cmd, check=True)
     if not src.is_file():
         raise FileNotFoundError(src)

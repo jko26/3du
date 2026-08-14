@@ -71,3 +71,10 @@ At 5 fps, a 2s window is 10 frames.
 ## Setup notes
 
 Install **torch / torchvision** against the cluster CUDA wheel index before or during `scripts/setup.sh`. DA3-Giant may OOM at 32G — bump `--mem` on the sbatch header if needed.
+
+Ingest needs **yt-dlp** and **ffmpeg** in the same Python the job uses. Shared Anaconda often has no `yt-dlp` on `PATH`; install the module, then resubmit:
+
+```bash
+python -m pip install --user yt-dlp
+# ffmpeg: module load ffmpeg   # or whatever your cluster provides
+```

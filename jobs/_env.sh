@@ -11,6 +11,7 @@ export CORK3DU_DA3="${CORK3DU_DA3:-$CORK3DU_ROOT/third_party/Depth-Anything-3}"
 export CORK3DU_SAM2="${CORK3DU_SAM2:-$CORK3DU_ROOT/third_party/sam2}"
 export CORK3DU_SAM2_CKPT="${CORK3DU_SAM2_CKPT:-$CORK3DU_WEIGHTS/sam2.1_hiera_large.pt}"
 export PYTHONPATH="${CORK3DU_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
+export PATH="${HOME}/.local/bin:${PATH}"
 
 mkdir -p "$CORK3DU_ROOT/logs" "$CORK3DU_DATA"/{chunks,scenes,weights,logs}
 
