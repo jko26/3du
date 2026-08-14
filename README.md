@@ -21,7 +21,7 @@ Env vars are `CORK3DU_*` because bash identifiers cannot start with a digit. Job
 
 ## First run (20 × 20s Amsterdam chunks)
 
-On the JHU GPU cluster, after `git pull`:
+On the JHU cluster, after `git pull`:
 
 ```bash
 cd $HOME/projects/3du   # or wherever you cloned
@@ -32,11 +32,17 @@ module load shared
 module load python311
 module load pytorch-py311-cuda12.1-gcc11/2.2.0
 bash scripts/make_env.sh
-bash scripts/setup.sh
 
-sbatch jobs/ingest_wtours.sbatch          # HF amsterdam/_source.mp4, then 20×20s splits
-sbatch jobs/wtours20.sbatch               # array 0-19; wait until ingest is done
+sbatch jobs/setup.sbatch                  # CPU (shared): clone, pip, checkpoints
+sbatch jobs/ingest_wtours.sbatch          # CPU (shared): HF clip + 20×20s splits
+sbatch jobs/wtours20.sbatch               # GPU: array 0-19; wait until ingest is done
 ```
+
+| Job | Partition | GPU? |
+|---|---|---|
+| `jobs/setup.sbatch` | `shared` | no |
+| `jobs/ingest_wtours.sbatch` | `shared` | no |
+| `jobs/wtours20.sbatch` / `reconstruct` / `remask` / `run_scene` | `gpu,gpua100,gpuh100` | yes |
 
 Always `sbatch` from the clone root so `SLURM_SUBMIT_DIR/jobs/_env.sh` resolves.
 
@@ -75,6 +81,6 @@ At 5 fps, a 2s window is 10 frames.
 
 ## Setup notes
 
-After `git pull`, re-run `bash scripts/setup.sh` (or `sbatch jobs/setup.sbatch`) so DA3-Streaming’s import-time extras (`pypose`, `evo`, `pycolmap`, `moviepy==1.0.3`, …) land in the venv. `python -m cork3du preflight` lists every missing module at once. Do not `pip install torch` / `xformers` / `numpy>=2`. DA3-Giant may OOM at 32G — bump `--mem` on the sbatch header if needed.
+After `git pull`, re-run `sbatch jobs/setup.sbatch` (CPU `shared` queue — do not use a login node) so DA3-Streaming’s import-time extras (`pypose`, `evo`, `pycolmap`, `moviepy==1.0.3`, …) land in the venv. `python -m cork3du preflight` lists every missing module at once. Do not `pip install torch` / `xformers` / `numpy>=2`. DA3-Giant may OOM at 32G — bump `--mem` on the GPU sbatch header if needed.
 
 Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Recreate it with `bash scripts/make_env.sh` after `module load shared python311 pytorch-py311-cuda12.1-gcc11/2.2.0` so the venv can see cluster torch (`--system-site-packages`). Do not `pip install torch` from PyPI (CPU, or NVIDIA index 403). ffmpeg comes from `module load ffmpeg` or `imageio-ffmpeg`.
