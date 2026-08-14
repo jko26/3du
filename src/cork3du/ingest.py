@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -60,6 +61,8 @@ def ingest_wtours(
             sys.executable,
             "-m",
             "yt_dlp",
+            "--proxy",
+            "",
             "-f",
             fmt,
             "--download-sections",
@@ -77,7 +80,22 @@ def ingest_wtours(
                 "yt-dlp is not installed in this Python. On the cluster run:\n"
                 f"  {sys.executable} -m pip install --user yt-dlp"
             ) from e
-        subprocess.run(cmd, check=True)
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k.lower() not in ("http_proxy", "https_proxy", "all_proxy")
+        }
+        try:
+            subprocess.run(cmd, check=True, env=env)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "YouTube is blocked from this node (proxy/firewall). "
+                "Download the first 400s on a laptop, copy it to the cluster, then resubmit ingest:\n"
+                f"  python -m yt_dlp -f '{fmt}' --download-sections '*0-{total_s}' "
+                f"--force-keyframes-at-cuts -o _source.mp4 --no-playlist {url}\n"
+                f"  rsync -avP _source.mp4 <cluster>:{src}\n"
+                "Ingest skips yt-dlp when that file already exists."
+            ) from e
     if not src.is_file():
         raise FileNotFoundError(src)
 
