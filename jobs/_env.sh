@@ -19,9 +19,8 @@ export PYTHONPATH="${CORK3DU_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 mkdir -p "$CORK3DU_ROOT/logs" "$CORK3DU_DATA"/{chunks,scenes,weights,logs}
 
-# Venv must be created with --system-site-packages from the module python
-# so cluster torch is visible. Load the module *before* activating.
 if [[ -x "$CORK3DU_ENV/bin/python" ]]; then
+  link_cluster_torch_into_venv "$CORK3DU_ENV"
   export PATH="$CORK3DU_ENV/bin:$PATH"
   export VIRTUAL_ENV="$CORK3DU_ENV"
 elif [[ -f "$CORK3DU_ROOT/.venv/bin/activate" ]]; then

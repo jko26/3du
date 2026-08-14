@@ -25,6 +25,9 @@ if [[ ! -x "$CORK3DU_ENV/bin/python" ]]; then
   "$PY" -m venv --system-site-packages "$CORK3DU_ENV"
 fi
 
+# Module python is still first on PATH here (venv not prepended yet).
+link_cluster_torch_into_venv "$CORK3DU_ENV"
+
 export PATH="$CORK3DU_ENV/bin:$PATH"
 python -m pip install -U pip
 python -m pip install -e "$CORK3DU_ROOT"

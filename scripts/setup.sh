@@ -18,6 +18,7 @@ mkdir -p "$CORK3DU_DATA"/{chunks,scenes,weights,logs}
 mkdir -p "$CORK3DU_ROOT/third_party" "$CORK3DU_ROOT/logs"
 
 if [[ -x "$CORK3DU_ENV/bin/python" ]]; then
+  link_cluster_torch_into_venv "$CORK3DU_ENV"
   export PATH="$CORK3DU_ENV/bin:$PATH"
   export VIRTUAL_ENV="$CORK3DU_ENV"
 fi

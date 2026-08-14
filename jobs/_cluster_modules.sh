@@ -13,3 +13,14 @@ load_cork3du_modules() {
   module load ffmpeg 2>/dev/null || true
   set -u
 }
+
+# Nested venvs do not inherit the module's torch. Drop a .pth into the venv
+# while the *module* python can still `import torch`.
+link_cluster_torch_into_venv() {
+  local env_root="${1:?}"
+  local site dest
+  site="$(python -c "import torch, pathlib; print(pathlib.Path(torch.__file__).resolve().parent.parent)")"
+  dest="$(ls -d "$env_root"/lib/python3.*/site-packages | head -1)"
+  echo "$site" > "$dest/z_cluster_torch.pth"
+  echo "linked cluster torch $site → $dest/z_cluster_torch.pth"
+}
