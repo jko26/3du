@@ -4,6 +4,10 @@
 set -euo pipefail
 
 JOBS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$JOBS_DIR/_cluster_modules.sh"
+load_cork3du_modules
+
 export CORK3DU_ROOT="${CORK3DU_ROOT:-$(cd "$JOBS_DIR/.." && pwd)}"
 export CORK3DU_DATA="${CORK3DU_DATA:-/projects/sinus_clinical_data/3du}"
 export CORK3DU_ENV="${CORK3DU_ENV:-$CORK3DU_DATA/env}"
@@ -15,7 +19,8 @@ export PYTHONPATH="${CORK3DU_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 mkdir -p "$CORK3DU_ROOT/logs" "$CORK3DU_DATA"/{chunks,scenes,weights,logs}
 
-# Prefer project-disk venv, then clone .venv. Never pip into shared Anaconda.
+# Venv must be created with --system-site-packages from the module python
+# so cluster torch is visible. Load the module *before* activating.
 if [[ -x "$CORK3DU_ENV/bin/python" ]]; then
   export PATH="$CORK3DU_ENV/bin:$PATH"
   export VIRTUAL_ENV="$CORK3DU_ENV"
@@ -25,11 +30,6 @@ elif [[ -f "$CORK3DU_ROOT/.venv/bin/activate" ]]; then
 fi
 export PATH="${HOME}/.local/bin:${PATH}"
 
-if ! command -v ffmpeg >/dev/null 2>&1; then
-  if type module >/dev/null 2>&1; then
-    module load ffmpeg 2>/dev/null || true
-  fi
-fi
-
 cd "$CORK3DU_ROOT"
 echo "python=$(command -v python) ($(python -c 'import sys; print(sys.executable)'))"
+python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)" 2>/dev/null || echo "torch not importable yet"

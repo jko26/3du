@@ -27,9 +27,10 @@ On the JHU GPU cluster, after `git pull`:
 cd $HOME/projects/3du   # or wherever you cloned
 mkdir -p logs           # Slurm opens logs/ before the job script runs
 
-# one-time, on a login node — venv on project disk, not shared Anaconda
+# one-time, on a login node — venv on project disk, using cluster CUDA PyTorch
+module load shared
+module load pytorch-py311-cuda12.1-gcc11/2.2.0
 bash scripts/make_env.sh
-# later, before wtours20: CUDA torch into that env, then
 bash scripts/setup.sh
 
 sbatch jobs/ingest_wtours.sbatch          # HF amsterdam/_source.mp4, then 20×20s splits
@@ -75,4 +76,4 @@ At 5 fps, a 2s window is 10 frames.
 
 Install **torch / torchvision** against the cluster CUDA wheel index into `$CORK3DU_DATA/env` before `wtours20`. DA3-Giant may OOM at 32G — bump `--mem` on the sbatch header if needed.
 
-Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Create it with `bash scripts/make_env.sh` on a login node. ffmpeg comes from PATH (`module load ffmpeg`) or the `imageio-ffmpeg` wheel.
+Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Recreate it with `bash scripts/make_env.sh` after `module load pytorch-py311-cuda12.1-gcc11/2.2.0` so the venv can see cluster torch (`--system-site-packages`). Do not `pip install torch` from PyPI (CPU, or NVIDIA index 403). ffmpeg comes from `module load ffmpeg` or `imageio-ffmpeg`.

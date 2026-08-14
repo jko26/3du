@@ -10,6 +10,10 @@ export CORK3DU_DA3="${CORK3DU_DA3:-$CORK3DU_ROOT/third_party/Depth-Anything-3}"
 export CORK3DU_SAM2="${CORK3DU_SAM2:-$CORK3DU_ROOT/third_party/sam2}"
 export CORK3DU_ENV="${CORK3DU_ENV:-$CORK3DU_DATA/env}"
 
+# shellcheck source=/dev/null
+source "$ROOT/jobs/_cluster_modules.sh"
+load_cork3du_modules
+
 mkdir -p "$CORK3DU_DATA"/{chunks,scenes,weights,logs}
 mkdir -p "$CORK3DU_ROOT/third_party" "$CORK3DU_ROOT/logs"
 
@@ -39,4 +43,4 @@ echo "  CORK3DU_ROOT=$CORK3DU_ROOT"
 echo "  CORK3DU_DATA=$CORK3DU_DATA"
 echo "  CORK3DU_DA3=$CORK3DU_DA3"
 echo "  CORK3DU_SAM2=$CORK3DU_SAM2"
-echo "Install torch/torchvision for this cluster CUDA *before* or after, matching the GPU."
+echo "Install torch via the cluster module pytorch-py311-cuda12.1-gcc11 (see scripts/make_env.sh), not pip cu124."
