@@ -28,14 +28,27 @@ if [[ ! -d "$CORK3DU_DA3/.git" ]]; then
 fi
 if [[ ! -d "$CORK3DU_SAM2/.git" ]]; then
   git clone --recursive https://github.com/facebookresearch/sam2.git "$CORK3DU_SAM2"
-  pip install -e "$CORK3DU_SAM2"
 fi
+pip install -e "$CORK3DU_SAM2"
 
 CKPT="$CORK3DU_WEIGHTS/sam2.1_hiera_large.pt"
 if [[ ! -f "$CKPT" ]]; then
   mkdir -p "$CORK3DU_WEIGHTS"
-  curl -L -o "$CKPT" \
-    https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt
+  echo "downloading SAM2 checkpoint via Hugging Face (not fbaipublicfiles)"
+  python - <<PY
+from huggingface_hub import hf_hub_download
+from pathlib import Path
+dest = Path("$CKPT")
+got = hf_hub_download(
+    "facebook/sam2.1-hiera-large",
+    "sam2.1_hiera_large.pt",
+    local_dir=str(dest.parent),
+)
+got = Path(got)
+if got.resolve() != dest.resolve():
+    dest.write_bytes(got.read_bytes())
+print("sam2 ckpt", dest, dest.stat().st_size)
+PY
 fi
 
 pip install -e "$CORK3DU_ROOT"
@@ -44,4 +57,4 @@ echo "  CORK3DU_ROOT=$CORK3DU_ROOT"
 echo "  CORK3DU_DATA=$CORK3DU_DATA"
 echo "  CORK3DU_DA3=$CORK3DU_DA3"
 echo "  CORK3DU_SAM2=$CORK3DU_SAM2"
-echo "Install torch via the cluster module pytorch-py311-cuda12.1-gcc11 (see scripts/make_env.sh), not pip cu124."
+echo "  SAM2_CKPT=$CKPT"
