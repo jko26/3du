@@ -29,10 +29,11 @@ fi
 if [[ ! -d "$CORK3DU_SAM2/.git" ]]; then
   git clone --recursive https://github.com/facebookresearch/sam2.git "$CORK3DU_SAM2"
 fi
-# Login nodes kill isolated torch rebuilds. Use the module torch already in the venv.
-# CUDA custom ops are optional; SAM2 falls back to PyTorch.
+# SAM2's pyproject wants torch>=2.5.1 and will otherwise pip-install a
+# CPU/cu13 wheel over the cluster 2.2.0+cu121. Install deps only, then SAM2.
+pip install "hydra-core>=1.3.2" "iopath>=0.1.10" "omegaconf>=2.2,<2.4"
 export SAM2_BUILD_CUDA="${SAM2_BUILD_CUDA:-0}"
-pip install -e "$CORK3DU_SAM2" --no-build-isolation
+pip install -e "$CORK3DU_SAM2" --no-build-isolation --no-deps
 
 CKPT="$CORK3DU_WEIGHTS/sam2.1_hiera_large.pt"
 if [[ ! -f "$CKPT" ]]; then
@@ -54,7 +55,7 @@ print("sam2 ckpt", dest, dest.stat().st_size)
 PY
 fi
 
-pip install -e "$CORK3DU_ROOT"
+pip install -e "$CORK3DU_ROOT" --no-build-isolation
 echo "setup ok"
 echo "  CORK3DU_ROOT=$CORK3DU_ROOT"
 echo "  CORK3DU_DATA=$CORK3DU_DATA"
