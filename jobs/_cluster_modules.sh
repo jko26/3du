@@ -8,6 +8,7 @@ load_cork3du_modules() {
   fi
   set +u
   module load shared 2>/dev/null || true
+  module load python311
   module load pytorch-py311-cuda12.1-gcc11/2.2.0
   module load ffmpeg 2>/dev/null || true
   set -u
