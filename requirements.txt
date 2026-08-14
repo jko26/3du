@@ -1,4 +1,6 @@
-# Core (pip install -e .)
+# Core (pip install -e .). Constraint file: constraints/hpc.txt
+# pypose is installed with --no-deps in scripts/setup.sh so pip cannot
+# replace cluster CUDA torch.
 numpy<2
 opencv-python-headless
 Pillow
@@ -10,12 +12,27 @@ einops
 tqdm
 scipy
 yt-dlp
+imageio
 imageio-ffmpeg
 faiss-cpu
-numba
+numba>=0.59,<0.61
 plyfile
+pandas
+prettytable
+trimesh
+scikit-learn
+addict
+evo
+moviepy==1.0.3
+pycolmap
+rich
+omegaconf>=2.2,<2.4
+requests
+hydra-core>=1.3.2
+iopath>=0.1.10
+decorator>=4.0.2,<6.0
+proglog<=1.0.0
 
-# Install these against the cluster CUDA index BEFORE the rest, e.g.
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-# torch
-# torchvision
+# Cluster CUDA PyTorch — do not pip-install:
+#   module load pytorch-py311-cuda12.1-gcc11/2.2.0
+# Then: pip install --no-deps pypose

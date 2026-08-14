@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .ffbin import ffmpeg_bin
 
 logger = logging.getLogger(__name__)
@@ -205,9 +207,12 @@ def remask_scene(
     max_points: int = 400_000,
 ) -> dict[str, Any]:
     from .preview import write_scene_previews
+    from .preflight import run_preflight
     from .reconstruct import fuse_masked_cloud, load_stream_rgbs
     from .residual import compute_p_resid
     from .sam2_tracks import find_residual_blob_seeds, run_sam2_tracks
+
+    run_preflight(require_da3_tree=False, require_sam2=True)
     import cv2
     scene_dir = Path(scene_dir)
     stream_out = scene_dir / "stream_out"

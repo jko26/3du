@@ -72,6 +72,9 @@ def cmd_remask(args: argparse.Namespace) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> None:
+    from .preflight import run_preflight
+
+    run_preflight()
     cmd_reconstruct(args)
     args.scene = args.out
     cmd_remask(args)
@@ -82,6 +85,13 @@ def cmd_preview(args: argparse.Namespace) -> None:
 
     info = write_scene_previews(Path(args.scene))
     print(json.dumps(info, indent=2))
+
+
+def cmd_preflight(args: argparse.Namespace) -> None:
+    from .preflight import run_preflight
+
+    run_preflight(require_da3_tree=not args.skip_da3, require_sam2=not args.skip_sam2)
+    print("preflight ok")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -117,6 +127,11 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("preview", help="Regenerate preview.png/html from cloud.npy")
     p.add_argument("--scene", required=True)
     p.set_defaults(func=cmd_preview)
+
+    p = sub.add_parser("preflight", help="Import-check DA3/SAM2/RAFT deps before a GPU job")
+    p.add_argument("--skip-da3", action="store_true")
+    p.add_argument("--skip-sam2", action="store_true")
+    p.set_defaults(func=cmd_preflight)
 
     args = parser.parse_args(argv)
     args.func(args)

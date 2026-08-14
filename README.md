@@ -75,6 +75,6 @@ At 5 fps, a 2s window is 10 frames.
 
 ## Setup notes
 
-Install **torch / torchvision** against the cluster CUDA wheel index into `$CORK3DU_DATA/env` before `wtours20`. DA3-Giant may OOM at 32G — bump `--mem` on the sbatch header if needed.
+After `git pull`, re-run `bash scripts/setup.sh` (or `sbatch jobs/setup.sbatch`) so DA3-Streaming’s import-time extras (`pypose`, `evo`, `pycolmap`, `moviepy==1.0.3`, …) land in the venv. `python -m cork3du preflight` lists every missing module at once. Do not `pip install torch` / `xformers` / `numpy>=2`. DA3-Giant may OOM at 32G — bump `--mem` on the sbatch header if needed.
 
 Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Recreate it with `bash scripts/make_env.sh` after `module load shared python311 pytorch-py311-cuda12.1-gcc11/2.2.0` so the venv can see cluster torch (`--system-site-packages`). Do not `pip install torch` from PyPI (CPU, or NVIDIA index 403). ffmpeg comes from `module load ffmpeg` or `imageio-ffmpeg`.

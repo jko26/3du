@@ -111,8 +111,12 @@ def run_da3_streaming(
         "--output_dir",
         str(output_dir),
     ]
+    da3_repo = da3_streaming_root.parent if da3_streaming_root.name == "da3_streaming" else da3_streaming_root
+    from .preflight import apply_da3_pythonpath
+
+    env = apply_da3_pythonpath(da3_repo)
     logger.info("DA3-Streaming: cwd=%s", da3_streaming_root)
-    subprocess.run(cmd, cwd=str(da3_streaming_root), check=True)
+    subprocess.run(cmd, cwd=str(da3_streaming_root), env=env, check=True)
     return output_dir
 
 
@@ -245,6 +249,9 @@ def reconstruct_video(
     frame_width: int = 640,
 ) -> dict[str, Any]:
     """Extract frames and run DA3-Streaming. Masking is a separate remask step."""
+    from .preflight import run_preflight
+
+    run_preflight(require_da3_tree=True, require_sam2=False)
     out_dir.mkdir(parents=True, exist_ok=True)
     images_dir = out_dir / "images"
     stream_out = out_dir / "stream_out"

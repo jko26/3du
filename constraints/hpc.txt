@@ -1,0 +1,5 @@
+# Keep cluster CUDA torch + numpy 1.x. Never let pip pull numpy 2 or a PyPI torch.
+numpy<2
+numba>=0.59,<0.61
+# moviepy 2 dropped moviepy.editor, which DA3 imports at api load.
+moviepy==1.0.3
