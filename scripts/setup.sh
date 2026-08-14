@@ -56,6 +56,7 @@ PY
 fi
 
 pip install -e "$CORK3DU_ROOT" --no-build-isolation
+python -m pip install faiss-cpu numba plyfile
 echo "setup ok"
 echo "  CORK3DU_ROOT=$CORK3DU_ROOT"
 echo "  CORK3DU_DATA=$CORK3DU_DATA"

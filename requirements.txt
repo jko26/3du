@@ -11,6 +11,9 @@ tqdm
 scipy
 yt-dlp
 imageio-ffmpeg
+faiss-cpu
+numba
+plyfile
 
 # Install these against the cluster CUDA index BEFORE the rest, e.g.
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124

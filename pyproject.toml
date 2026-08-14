@@ -21,6 +21,9 @@ dependencies = [
   "scipy",
   "yt-dlp",
   "imageio-ffmpeg",
+  "faiss-cpu",
+  "numba",
+  "plyfile",
 ]
 
 [project.optional-dependencies]
