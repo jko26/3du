@@ -8,9 +8,15 @@ export CORK3DU_DATA="${CORK3DU_DATA:-/projects/sinus_clinical_data/3du}"
 export CORK3DU_WEIGHTS="${CORK3DU_WEIGHTS:-$CORK3DU_DATA/weights}"
 export CORK3DU_DA3="${CORK3DU_DA3:-$CORK3DU_ROOT/third_party/Depth-Anything-3}"
 export CORK3DU_SAM2="${CORK3DU_SAM2:-$CORK3DU_ROOT/third_party/sam2}"
+export CORK3DU_ENV="${CORK3DU_ENV:-$CORK3DU_DATA/env}"
 
 mkdir -p "$CORK3DU_DATA"/{chunks,scenes,weights,logs}
 mkdir -p "$CORK3DU_ROOT/third_party" "$CORK3DU_ROOT/logs"
+
+if [[ -x "$CORK3DU_ENV/bin/python" ]]; then
+  export PATH="$CORK3DU_ENV/bin:$PATH"
+  export VIRTUAL_ENV="$CORK3DU_ENV"
+fi
 
 if [[ ! -d "$CORK3DU_DA3/.git" ]]; then
   git clone --recursive https://github.com/ByteDance-Seed/Depth-Anything-3.git "$CORK3DU_DA3"

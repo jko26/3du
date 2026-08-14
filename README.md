@@ -24,9 +24,12 @@ Env vars are `CORK3DU_*` because bash identifiers cannot start with a digit. Job
 On the JHU GPU cluster, after `git pull`:
 
 ```bash
-cd $HOME/3du
-mkdir -p logs   # Slurm opens logs/ before the job script runs
-# one-time: conda/venv + torch for this CUDA, then
+cd $HOME/projects/3du   # or wherever you cloned
+mkdir -p logs           # Slurm opens logs/ before the job script runs
+
+# one-time, on a login node — venv on project disk, not shared Anaconda
+bash scripts/make_env.sh
+# later, before wtours20: CUDA torch into that env, then
 bash scripts/setup.sh
 
 sbatch jobs/ingest_wtours.sbatch          # yt-dlp first 400s, 20×20s mp4s
@@ -70,11 +73,6 @@ At 5 fps, a 2s window is 10 frames.
 
 ## Setup notes
 
-Install **torch / torchvision** against the cluster CUDA wheel index before or during `scripts/setup.sh`. DA3-Giant may OOM at 32G — bump `--mem` on the sbatch header if needed.
+Install **torch / torchvision** against the cluster CUDA wheel index into `$CORK3DU_DATA/env` before `wtours20`. DA3-Giant may OOM at 32G — bump `--mem` on the sbatch header if needed.
 
-Ingest needs **yt-dlp** and **ffmpeg** in the same Python the job uses. Shared Anaconda often has no `yt-dlp` on `PATH`; install the module, then resubmit:
-
-```bash
-python -m pip install --user yt-dlp
-# ffmpeg: module load ffmpeg   # or whatever your cluster provides
-```
+Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Create it with `bash scripts/make_env.sh` on a login node. You also need **ffmpeg** (`module load ffmpeg` or equivalent).
