@@ -43,8 +43,27 @@ sbatch jobs/wtours20.sbatch               # GPU: array 0-19; wait until ingest i
 | `jobs/setup.sbatch` | `shared` | no |
 | `jobs/ingest_wtours.sbatch` | `shared` | no |
 | `jobs/wtours20.sbatch` / `reconstruct` / `remask` / `run_scene` | `gpua100,gpuh100` (≥40GB) | yes |
+| `jobs/instances20.sbatch` | `gpua100,gpuh100` | yes (SAM2 AMG) |
 
 DA3 Nested-Giant OOMs a 16GB `gpu` card (T4/V100) at 60-view chunks. GPU jobs skip that partition. Chunk size is chosen from VRAM: 4/2 on <24GB, 12/6 on 40GB, 24/12 on 80GB.
+
+## Stage 3–4 (static 3D instances)
+
+After a scene has `cloud.npy` (and ideally `masks/final_*.png` from remask):
+
+```bash
+sbatch jobs/instances20.sbatch    # array 0-19; SAM2 AMG + superpoint affinity lift
+```
+
+This is SAI3D-style (voxel superpoints + multi-view SAM co-occurrence + region grow) using the SAM2 already in the venv — not the official ScanNet/Semantic-SAM stack. Dynamic pixels from remask are dropped before lifting.
+
+```
+$CORK3DU_DATA/scenes/amsterdam_000/instances/
+  instance_000.npy …     # (N,6) xyzrgb per instance
+  point_instances.npy    # per-point ids (-1 unassigned)
+  preview.png / .html    # colored by instance
+  meta.json              # n_things vs n_stuff (ground / huge regions)
+```
 
 Always `sbatch` from the clone root so `SLURM_SUBMIT_DIR/jobs/_env.sh` resolves.
 
@@ -69,6 +88,7 @@ export CORK3DU_DATA=/projects/sinus_clinical_data/3du
 python -m cork3du ingest-wtours --city amsterdam --n-chunks 20 --chunk-seconds 20
 python -m cork3du run --video $CORK3DU_DATA/chunks/amsterdam/000.mp4 --out $CORK3DU_DATA/scenes/amsterdam_000
 python -m cork3du remask --scene $CORK3DU_DATA/scenes/amsterdam_000
+python -m cork3du instances --scene $CORK3DU_DATA/scenes/amsterdam_000
 python -m cork3du preview --scene $CORK3DU_DATA/scenes/amsterdam_000
 ```
 

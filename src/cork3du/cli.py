@@ -94,6 +94,20 @@ def cmd_preflight(args: argparse.Namespace) -> None:
     print("preflight ok")
 
 
+def cmd_instances(args: argparse.Namespace) -> None:
+    from .instances import instance_scene
+
+    paths.ensure_data_dirs()
+    meta = instance_scene(
+        Path(args.scene),
+        sam2_root=paths.sam2_root(),
+        sam2_checkpoint=paths.sam2_checkpoint(),
+        n_keyframes=args.n_keyframes,
+    )
+    summary = {k: meta[k] for k in meta if k != "instances"}
+    print(json.dumps(summary, indent=2, default=str))
+
+
 def main(argv: list[str] | None = None) -> None:
     _log()
     parser = argparse.ArgumentParser(prog="3du", description="DA3 + residual 2s 40/40 static reconstruction")
@@ -132,6 +146,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--skip-da3", action="store_true")
     p.add_argument("--skip-sam2", action="store_true")
     p.set_defaults(func=cmd_preflight)
+
+    p = sub.add_parser("instances", help="SAM2 AMG + superpoint lift → 3D instances (Stage 3–4)")
+    p.add_argument("--scene", required=True)
+    p.add_argument("--n-keyframes", type=int, default=8)
+    p.set_defaults(func=cmd_instances)
 
     args = parser.parse_args(argv)
     args.func(args)
