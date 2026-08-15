@@ -42,7 +42,9 @@ sbatch jobs/wtours20.sbatch               # GPU: array 0-19; wait until ingest i
 |---|---|---|
 | `jobs/setup.sbatch` | `shared` | no |
 | `jobs/ingest_wtours.sbatch` | `shared` | no |
-| `jobs/wtours20.sbatch` / `reconstruct` / `remask` / `run_scene` | `gpu,gpua100,gpuh100` | yes |
+| `jobs/wtours20.sbatch` / `reconstruct` / `remask` / `run_scene` | `gpua100,gpuh100` (≥40GB) | yes |
+
+DA3 Nested-Giant OOMs a 16GB `gpu` card (T4/V100) at 60-view chunks. GPU jobs skip that partition. Chunk size is chosen from VRAM: 4/2 on <24GB, 12/6 on 40GB, 24/12 on 80GB.
 
 Always `sbatch` from the clone root so `SLURM_SUBMIT_DIR/jobs/_env.sh` resolves.
 

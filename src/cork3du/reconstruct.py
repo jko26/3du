@@ -22,6 +22,25 @@ DA3_HF_REPO = "depth-anything/DA3NESTED-GIANT-LARGE-1.1"
 SALAD_URL = "https://github.com/serizba/salad/releases/download/v1.0.0/dino_salad.ckpt"
 
 
+def chunk_size_for_vram_gib(gb: float) -> tuple[int, int]:
+    """DA3 Nested-Giant chunk/overlap. 60-view chunks OOM a 16GB card."""
+    if gb < 24:
+        return 4, 2
+    if gb < 48:
+        return 12, 6
+    return 24, 12
+
+
+def cuda_vram_gib() -> tuple[float, str]:
+    import torch
+
+    if not torch.cuda.is_available():
+        return 0.0, "cpu"
+    props = torch.cuda.get_device_properties(0)
+    gb = float(props.total_memory) / (1024**3)
+    return gb, str(props.name)
+
+
 def extract_frames_ffmpeg(
     video_path: Path,
     out_dir: Path,
@@ -70,13 +89,21 @@ def write_streaming_config(
     weights_dir: Path,
     n_frames: int,
     delete_temp_files: bool = False,
+    chunk_size: int | None = None,
+    overlap: int | None = None,
 ) -> Path:
     with open(template_path) as f:
         cfg = yaml.safe_load(f)
-    chunk = min(60, max(8, n_frames))
-    overlap = min(chunk // 2, max(0, chunk - 2))
+    if chunk_size is None or overlap is None:
+        gb, gpu_name = cuda_vram_gib()
+        auto_chunk, auto_overlap = chunk_size_for_vram_gib(gb if gb > 0 else 40.0)
+        logger.info("CUDA %s (%.1f GiB) → chunk=%s overlap=%s", gpu_name, gb, auto_chunk, auto_overlap)
+        chunk_size = auto_chunk if chunk_size is None else chunk_size
+        overlap = auto_overlap if overlap is None else overlap
+    chunk = max(2, min(int(chunk_size), n_frames))
+    ov = min(int(overlap), max(0, chunk - 2))
     cfg["Model"]["chunk_size"] = int(chunk)
-    cfg["Model"]["overlap"] = int(overlap)
+    cfg["Model"]["overlap"] = int(ov)
     cfg["Model"]["loop_enable"] = False
     cfg["Model"]["save_depth_conf_result"] = True
     cfg["Model"]["delete_temp_files"] = delete_temp_files
@@ -115,6 +142,8 @@ def run_da3_streaming(
     from .preflight import apply_da3_pythonpath
 
     env = apply_da3_pythonpath(da3_repo)
+    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    env.setdefault("PYTORCH_NO_CUDA_MEMORY_CACHING", "0")
     logger.info("DA3-Streaming: cwd=%s", da3_streaming_root)
     subprocess.run(cmd, cwd=str(da3_streaming_root), env=env, check=True)
     return output_dir
@@ -271,7 +300,23 @@ def reconstruct_video(
     template = da3_streaming_root / "da3_streaming" / "configs" / "base_config.yaml"
     if not template.is_file():
         template = da3_streaming_root / "configs" / "base_config.yaml"
-    write_streaming_config(template, cfg_path, weights_dir=weights_dir, n_frames=len(frame_paths))
+    gb, gpu_name = cuda_vram_gib()
+    chunk, overlap = chunk_size_for_vram_gib(gb if gb > 0 else 40.0)
+    logger.info(
+        "CUDA %s (%.1f GiB) → DA3 chunk=%s overlap=%s (Nested-Giant)",
+        gpu_name,
+        gb,
+        chunk,
+        overlap,
+    )
+    write_streaming_config(
+        template,
+        cfg_path,
+        weights_dir=weights_dir,
+        n_frames=len(frame_paths),
+        chunk_size=chunk,
+        overlap=overlap,
+    )
     if stream_out.exists():
         shutil.rmtree(stream_out)
     streaming_cwd = da3_streaming_root / "da3_streaming"
@@ -300,6 +345,10 @@ def reconstruct_video(
         "n_video_frames_sampled": int(len(frame_paths)),
         "fps": fps,
         "frame_width": frame_width,
+        "da3_chunk_size": int(chunk),
+        "da3_overlap": int(overlap),
+        "cuda_device": gpu_name,
+        "cuda_vram_gib": round(gb, 2),
         "stream_out": str(stream_out),
         "video": str(video_path),
     }

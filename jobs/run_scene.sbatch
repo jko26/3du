@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=3du_run
-#SBATCH --partition=gpu,gpua100,gpuh100
+#SBATCH --partition=gpua100,gpuh100
 #SBATCH --gres=gpu:1
 #SBATCH --time=04:00:00
 #SBATCH --ntasks=1
