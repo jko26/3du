@@ -28,3 +28,4 @@ fi
 python -m cork3du instances --scene "$SCENE"
 echo "preview: $SCENE/instances/preview.png"
 echo "html:    $SCENE/instances/preview.html"
+echo "amgdbg:  $SCENE/instances/amg_debug/"

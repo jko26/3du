@@ -1,9 +1,10 @@
-"""Stage 3–4 lift: superpoints, depth filter, affinity merge."""
+"""Stage 3–4 lift: superpoints, soft filter, affinity merge."""
 
 from __future__ import annotations
 
 import numpy as np
 
+from cork3du.instances import write_amg_debug_panel
 from cork3du.lift import (
     UnionFind,
     affinity_matrix,
@@ -33,9 +34,15 @@ def test_dynamic_overlap_drops_person_mask():
     dyn = np.zeros((8, 8), dtype=bool)
     dyn[2:6, 2:6] = True
     assert mask_dynamic_overlap(mask, dyn, max_frac=0.4) is True
+    # Loose default (0.85): full overlap still drops
+    assert mask_dynamic_overlap(mask, dyn, max_frac=0.85) is True
     dyn2 = np.zeros((8, 8), dtype=bool)
     dyn2[0, 0] = True
     assert mask_dynamic_overlap(mask, dyn2, max_frac=0.4) is False
+    # Partial bleed (~25%) survives the loose gate
+    dyn3 = np.zeros((8, 8), dtype=bool)
+    dyn3[2:6, 2:3] = True
+    assert mask_dynamic_overlap(mask, dyn3, max_frac=0.85) is False
 
 
 def test_depth_valid_frac():
@@ -43,6 +50,8 @@ def test_depth_valid_frac():
     depth = np.ones((4, 4), dtype=np.float32)
     depth[0] = 0
     assert abs(mask_depth_valid_frac(mask, depth) - 0.75) < 1e-6
+    # Loose min_depth_frac=0.10 would keep this mask (0.75 >= 0.10)
+    assert mask_depth_valid_frac(mask, depth) >= 0.10
 
 
 def test_merge_high_affinity():
@@ -77,3 +86,31 @@ def test_affinity_from_cooccur():
     both = np.array([[0.0, 5.0], [5.0, 0.0]])
     aff = affinity_matrix(co, both)
     assert abs(aff[0, 1] - 0.8) < 1e-9
+
+
+def test_amg_debug_panel(tmp_path=None):
+    from pathlib import Path
+
+    root = Path(tmp_path) if tmp_path is not None else Path("/tmp/cork3du_amg_debug_test")
+    root.mkdir(parents=True, exist_ok=True)
+    rgb = np.zeros((48, 64, 3), dtype=np.uint8)
+    rgb[:, :] = (30, 40, 50)
+    m1 = np.zeros((48, 64), dtype=bool)
+    m1[10:20, 10:30] = True
+    m2 = np.zeros((48, 64), dtype=bool)
+    m2[25:40, 40:55] = True
+    final = np.zeros((48, 64), dtype=bool)
+    final[10:20, 10:20] = True
+    out = write_amg_debug_panel(
+        rgb,
+        [m1, m2],
+        kept_masks=[m1],
+        dropped_dyn=[m2],
+        dropped_depth=[],
+        final_mask=final,
+        out_path=root / "frame_000.png",
+        frame_idx=0,
+        counts={"sam": 2, "kept": 1, "drop_dyn": 1, "drop_depth": 0},
+    )
+    assert out.is_file()
+    assert out.stat().st_size > 100

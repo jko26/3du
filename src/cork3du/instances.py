@@ -1,7 +1,7 @@
 """Stage 3–4: SAM2 automatic 2D masks → SAI3D-style superpoint lift → 3D instances.
 
 Uses the SAM2 already in the 3du env (no Semantic-SAM / official SAI3D ScanNet stack).
-Dynamic pixels from remask (`masks/final_*.png`) are excluded before lifting.
+Dynamic / low-depth AMG masks are soft-filtered (loose defaults); empty-voter masks are skipped.
 """
 
 from __future__ import annotations
@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 SAM2_CFG = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
+# Soft gates: only drop nearly-all-dynamic or almost-no-depth masks.
+DEFAULT_MAX_DYN_FRAC = 0.85
+DEFAULT_MIN_DEPTH_FRAC = 0.10
+
 
 def _load_dynamic_masks(scene_dir: Path, n: int, h: int, w: int) -> list[np.ndarray] | None:
     paths = sorted((scene_dir / "masks").glob("final_*.png"))
@@ -51,6 +55,110 @@ def _instance_palette(n: int) -> np.ndarray:
     rgb = rng.random((max(n, 1), 3))
     rgb = 0.35 + 0.65 * rgb
     return rgb.astype(np.float32)
+
+
+def _mask_palette(n: int) -> np.ndarray:
+    rng = np.random.default_rng(1)
+    return (rng.integers(40, 255, size=(max(n, 1), 3))).astype(np.uint8)
+
+
+def _overlay_masks(
+    rgb: np.ndarray,
+    masks: list[np.ndarray],
+    *,
+    alpha: float = 0.45,
+    colors: np.ndarray | None = None,
+) -> np.ndarray:
+    """Semi-transparent colored AMG blobs on RGB. masks may be bool HxW."""
+    out = rgb.astype(np.float32).copy()
+    if rgb.dtype != np.uint8:
+        base = np.clip(rgb, 0, 255).astype(np.uint8)
+        out = base.astype(np.float32)
+    else:
+        base = rgb
+        out = base.astype(np.float32)
+    pal = colors if colors is not None else _mask_palette(len(masks))
+    for i, m in enumerate(masks):
+        if m is None or not np.any(m):
+            continue
+        mb = m.astype(bool)
+        if mb.shape[:2] != out.shape[:2]:
+            mb = cv2.resize(mb.astype(np.uint8), (out.shape[1], out.shape[0]), interpolation=cv2.INTER_NEAREST).astype(
+                bool
+            )
+        c = pal[i % len(pal)].astype(np.float32)
+        out[mb] = (1.0 - alpha) * out[mb] + alpha * c
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _overlay_binary(rgb: np.ndarray, mask: np.ndarray | None, *, color=(0, 200, 255), alpha: float = 0.5) -> np.ndarray:
+    out = rgb.astype(np.float32).copy()
+    if mask is None or not np.any(mask):
+        return np.clip(out, 0, 255).astype(np.uint8)
+    mb = mask.astype(bool)
+    if mb.shape[:2] != out.shape[:2]:
+        mb = cv2.resize(mb.astype(np.uint8), (out.shape[1], out.shape[0]), interpolation=cv2.INTER_NEAREST).astype(bool)
+    c = np.array(color, dtype=np.float32)
+    out[mb] = (1.0 - alpha) * out[mb] + alpha * c
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _panel_label(img: np.ndarray, text: str) -> np.ndarray:
+    out = img.copy()
+    cv2.rectangle(out, (0, 0), (out.shape[1], 28), (0, 0, 0), thickness=-1)
+    cv2.putText(out, text, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+    return out
+
+
+def write_amg_debug_panel(
+    rgb: np.ndarray,
+    amg_masks: list[np.ndarray],
+    *,
+    kept_masks: list[np.ndarray],
+    dropped_dyn: list[np.ndarray],
+    dropped_depth: list[np.ndarray],
+    final_mask: np.ndarray | None,
+    out_path: Path,
+    frame_idx: int,
+    counts: dict[str, int],
+) -> Path:
+    """RGB | all AMG | kept AMG | remask final — one glanceable debug strip."""
+    if rgb.dtype != np.uint8:
+        rgb_u8 = np.clip(rgb, 0, 255).astype(np.uint8)
+    else:
+        rgb_u8 = rgb
+    all_ov = _overlay_masks(rgb_u8, amg_masks)
+    kept_ov = _overlay_masks(rgb_u8, kept_masks, colors=_mask_palette(max(len(kept_masks), 1)))
+    # dropped: red = dyn, orange = depth (draw dyn first, depth on top)
+    drop_ov = rgb_u8.astype(np.float32).copy()
+    for m in dropped_dyn:
+        mb = m.astype(bool)
+        drop_ov[mb] = 0.4 * drop_ov[mb] + 0.6 * np.array([40, 40, 220], dtype=np.float32)
+    for m in dropped_depth:
+        mb = m.astype(bool)
+        drop_ov[mb] = 0.4 * drop_ov[mb] + 0.6 * np.array([40, 160, 255], dtype=np.float32)
+    drop_ov = np.clip(drop_ov, 0, 255).astype(np.uint8)
+    final_ov = _overlay_binary(rgb_u8, final_mask, color=(0, 220, 255), alpha=0.55)
+
+    panels = [
+        _panel_label(rgb_u8, f"frame {frame_idx} RGB"),
+        _panel_label(all_ov, f"AMG all n={counts.get('sam', len(amg_masks))}"),
+        _panel_label(kept_ov, f"AMG kept n={counts.get('kept', len(kept_masks))}"),
+        _panel_label(
+            drop_ov,
+            f"dropped dyn={counts.get('drop_dyn', 0)} depth={counts.get('drop_depth', 0)}",
+        ),
+        _panel_label(final_ov, "remask final (residual+lock)"),
+    ]
+    # match heights
+    h = min(p.shape[0] for p in panels)
+    w = min(p.shape[1] for p in panels)
+    panels = [cv2.resize(p, (w, h), interpolation=cv2.INTER_AREA) for p in panels]
+    strip = np.concatenate(panels, axis=1)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out_path), cv2.cvtColor(strip, cv2.COLOR_RGB2BGR))
+    return out_path
 
 
 def run_sam2_amg(
@@ -102,10 +210,11 @@ def instance_scene(
     sam2_root: Path,
     sam2_checkpoint: Path,
     n_keyframes: int = 8,
-    min_depth_frac: float = 0.35,
-    max_dyn_frac: float = 0.4,
+    min_depth_frac: float = DEFAULT_MIN_DEPTH_FRAC,
+    max_dyn_frac: float = DEFAULT_MAX_DYN_FRAC,
     min_points: int = 80,
     stuff_frac: float = 0.22,
+    write_amg_debug: bool = True,
 ) -> dict[str, Any]:
     from .preflight import run_preflight
     from .reconstruct import load_stream_rgbs, read_c2w_poses, resize_mask
@@ -139,6 +248,17 @@ def instance_scene(
     if n_sp < 2:
         raise RuntimeError(f"too few superpoints ({n_sp}) in {scene_dir}")
 
+    # Prepare output dir early so AMG debug can land beside instances.
+    out_dir = scene_dir / "instances"
+    if out_dir.exists():
+        import shutil
+
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
+    debug_dir = out_dir / "amg_debug"
+    if write_amg_debug:
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
     dyn = _load_dynamic_masks(scene_dir, n, h, w)
     key_idxs = np.unique(np.linspace(0, n - 1, min(n_keyframes, n), dtype=int))
     co = np.zeros((n_sp, n_sp), dtype=np.float64)
@@ -146,6 +266,8 @@ def instance_scene(
     n_masks_kept = 0
     n_masks_drop_dyn = 0
     n_masks_drop_depth = 0
+    n_masks_no_voter = 0
+    debug_paths: list[str] = []
 
     for fi in key_idxs:
         fi = int(fi)
@@ -166,21 +288,64 @@ def instance_scene(
             dyn_f = resize_mask(dyn[fi].astype(np.float32), dh, dw) > 0.5
 
         voters_per_mask: list[list[int]] = []
+        kept_masks: list[np.ndarray] = []
+        dropped_dyn: list[np.ndarray] = []
+        dropped_depth: list[np.ndarray] = []
+        frame_drop_dyn = 0
+        frame_drop_depth = 0
+        frame_no_voter = 0
+        resized: list[np.ndarray] = []
         for m in masks:
             if m.shape != (dh, dw):
                 m = cv2.resize(m.astype(np.uint8), (dw, dh), interpolation=cv2.INTER_NEAREST).astype(bool)
+            resized.append(m)
             if mask_dynamic_overlap(m, dyn_f, max_frac=max_dyn_frac):
                 n_masks_drop_dyn += 1
+                frame_drop_dyn += 1
+                dropped_dyn.append(m)
                 continue
             if mask_depth_valid_frac(m, depth, conf) < min_depth_frac:
                 n_masks_drop_depth += 1
+                frame_drop_depth += 1
+                dropped_depth.append(m)
                 continue
             voters = superpoints_in_mask(labels, vis, ui, vi, m)
             if len(voters) >= 1:
                 voters_per_mask.append(voters)
+                kept_masks.append(m)
                 n_masks_kept += 1
+            else:
+                n_masks_no_voter += 1
+                frame_no_voter += 1
         accumulate_affinity(n_sp, voters_per_mask, visible_sps, co, both)
-        logger.info("frame %d: sam=%d kept=%d vis_sp=%d", fi, len(masks), len(voters_per_mask), len(visible_sps))
+        logger.info(
+            "frame %d: sam=%d kept=%d drop_dyn=%d drop_depth=%d no_voter=%d vis_sp=%d",
+            fi,
+            len(masks),
+            len(voters_per_mask),
+            frame_drop_dyn,
+            frame_drop_depth,
+            frame_no_voter,
+            len(visible_sps),
+        )
+        if write_amg_debug:
+            dbg = write_amg_debug_panel(
+                rgb,
+                resized,
+                kept_masks=kept_masks,
+                dropped_dyn=dropped_dyn,
+                dropped_depth=dropped_depth,
+                final_mask=dyn_f,
+                out_path=debug_dir / f"frame_{fi:03d}.png",
+                frame_idx=fi,
+                counts={
+                    "sam": len(masks),
+                    "kept": len(kept_masks),
+                    "drop_dyn": frame_drop_dyn,
+                    "drop_depth": frame_drop_depth,
+                },
+            )
+            debug_paths.append(str(dbg))
 
     aff = affinity_matrix(co, both)
     inst_of_sp = merge_superpoints(aff, both)
@@ -190,12 +355,6 @@ def instance_scene(
 
     # compact ids after dropping tiny / stuff
     records: list[dict[str, Any]] = []
-    out_dir = scene_dir / "instances"
-    if out_dir.exists():
-        import shutil
-
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
     next_id = 0
     compact = np.full(pts.shape[0], -1, dtype=np.int32)
     n_raw = int(point_inst.max()) + 1 if point_inst.max() >= 0 else 0
@@ -242,13 +401,17 @@ def instance_scene(
         "n_keyframes": int(len(key_idxs)),
         "key_idxs": [int(i) for i in key_idxs],
         "superpoints": sp_info,
+        "max_dyn_frac": float(max_dyn_frac),
+        "min_depth_frac": float(min_depth_frac),
         "n_masks_kept": n_masks_kept,
         "n_masks_drop_dyn": n_masks_drop_dyn,
         "n_masks_drop_depth": n_masks_drop_depth,
+        "n_masks_no_voter": n_masks_no_voter,
         "n_instances": next_id,
         "n_things": len(things),
         "n_stuff": next_id - len(things),
         "had_dynamic_masks": dyn is not None,
+        "amg_debug": debug_paths,
         "instances": records,
         "preview_png": str(png),
         "preview_html": str(html),
@@ -260,11 +423,16 @@ def instance_scene(
     old["instances"] = {k: meta[k] for k in meta if k != "instances"}
     scene_meta.write_text(json.dumps(old, indent=2, default=str) + "\n")
     logger.info(
-        "instances: %d things / %d total (%d superpoints, %d sam masks) → %s",
+        "instances: %d things / %d total (%d superpoints, kept=%d drop_dyn=%d drop_depth=%d no_voter=%d) → %s",
         len(things),
         next_id,
         n_sp,
         n_masks_kept,
+        n_masks_drop_dyn,
+        n_masks_drop_depth,
+        n_masks_no_voter,
         png,
     )
+    if debug_paths:
+        logger.info("AMG debug panels: %s (%d frames)", debug_dir, len(debug_paths))
     return meta

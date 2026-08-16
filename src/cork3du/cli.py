@@ -103,9 +103,14 @@ def cmd_instances(args: argparse.Namespace) -> None:
         sam2_root=paths.sam2_root(),
         sam2_checkpoint=paths.sam2_checkpoint(),
         n_keyframes=args.n_keyframes,
+        min_depth_frac=args.min_depth_frac,
+        max_dyn_frac=args.max_dyn_frac,
+        write_amg_debug=not args.no_amg_debug,
     )
-    summary = {k: meta[k] for k in meta if k != "instances"}
+    summary = {k: meta[k] for k in meta if k not in ("instances", "amg_debug")}
     print(json.dumps(summary, indent=2, default=str))
+    if meta.get("amg_debug"):
+        print(f"amg_debug: {Path(args.scene) / 'instances' / 'amg_debug'} ({len(meta['amg_debug'])} frames)")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -150,6 +155,19 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("instances", help="SAM2 AMG + superpoint lift → 3D instances (Stage 3–4)")
     p.add_argument("--scene", required=True)
     p.add_argument("--n-keyframes", type=int, default=8)
+    p.add_argument(
+        "--max-dyn-frac",
+        type=float,
+        default=0.85,
+        help="Drop AMG mask only if dynamic remask overlap exceeds this (default 0.85, was 0.4)",
+    )
+    p.add_argument(
+        "--min-depth-frac",
+        type=float,
+        default=0.10,
+        help="Drop AMG mask only if valid-depth fraction is below this (default 0.10, was 0.35)",
+    )
+    p.add_argument("--no-amg-debug", action="store_true", help="Skip AMG vs remask debug PNGs")
     p.set_defaults(func=cmd_instances)
 
     args = parser.parse_args(argv)
