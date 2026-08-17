@@ -30,9 +30,10 @@ logger = logging.getLogger(__name__)
 
 SAM2_CFG = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
-# Soft gates: only drop nearly-all-dynamic or almost-no-depth masks.
-DEFAULT_MAX_DYN_FRAC = 0.85
-DEFAULT_MIN_DEPTH_FRAC = 0.10
+# Keep-all defaults for inspection: never drop on dyn/depth (overlap >1 impossible;
+# depth frac <0 impossible). Tighten via CLI when filtering again.
+DEFAULT_MAX_DYN_FRAC = 1.0
+DEFAULT_MIN_DEPTH_FRAC = 0.0
 
 
 def _load_dynamic_masks(scene_dir: Path, n: int, h: int, w: int) -> list[np.ndarray] | None:

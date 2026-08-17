@@ -55,7 +55,7 @@ After a scene has `cloud.npy` (and ideally `masks/final_*.png` from remask):
 sbatch jobs/instances20.sbatch    # array 0-19; SAM2 AMG + superpoint affinity lift
 ```
 
-This is SAI3D-style (voxel superpoints + multi-view SAM co-occurrence + region grow) using the SAM2 already in the venv — not the official ScanNet/Semantic-SAM stack. Soft filters keep most AMG masks (drop only if ≥85% dynamic remask overlap, or <10% valid depth); masks with no cloud voters are still skipped.
+This is SAI3D-style (voxel superpoints + multi-view SAM co-occurrence + region grow) using the SAM2 already in the venv — not the official ScanNet/Semantic-SAM stack. By default **all AMG masks are kept** (no dyn/depth drop); masks that hit no cloud points still cannot vote. Tighten with `--max-dyn-frac` / `--min-depth-frac` if needed.
 
 ```
 $CORK3DU_DATA/scenes/amsterdam_000/instances/

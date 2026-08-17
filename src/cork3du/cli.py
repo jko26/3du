@@ -158,14 +158,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument(
         "--max-dyn-frac",
         type=float,
-        default=0.85,
-        help="Drop AMG mask only if dynamic remask overlap exceeds this (default 0.85, was 0.4)",
+        default=1.0,
+        help="Drop AMG mask if dynamic remask overlap exceeds this (default 1.0 = keep all)",
     )
     p.add_argument(
         "--min-depth-frac",
         type=float,
-        default=0.10,
-        help="Drop AMG mask only if valid-depth fraction is below this (default 0.10, was 0.35)",
+        default=0.0,
+        help="Drop AMG mask if valid-depth fraction is below this (default 0.0 = keep all)",
     )
     p.add_argument("--no-amg-debug", action="store_true", help="Skip AMG vs remask debug PNGs")
     p.set_defaults(func=cmd_instances)
