@@ -109,6 +109,6 @@ At 5 fps, a 2s window is 10 frames.
 
 ## Setup notes
 
-After `git pull`, re-run `sbatch jobs/setup.sbatch` (CPU `shared` queue — do not use a login node) so DA3-Streaming extras, SAM2, and ODISE (`detectron2`, `mask2former`, …) land in the venv. `python -m cork3du preflight` checks DA3/SAM2; `python -m cork3du preflight --check-odise --skip-da3 --skip-sam2` verifies ODISE. Do not `pip install torch` / `xformers` / `numpy>=2`. DA3-Giant may OOM at 32G — bump `--mem` on the GPU sbatch header if needed. ODISE is heavy; bump `--time` / `--mem` on `instances20` if jobs OOM or time out.
+After `git pull`, re-run `sbatch jobs/setup.sbatch` (do not use a login node for heavy pip) so DA3-Streaming extras, SAM2, and ODISE (`detectron2`, `mask2former`, …) land in the venv. `python -m cork3du preflight` checks DA3/SAM2; `python -m cork3du preflight --check-odise --skip-da3 --skip-sam2` verifies ODISE. Do not `pip install torch` / `xformers` / `numpy>=2`. DA3-Giant may OOM at 32G — bump `--mem` on the GPU sbatch header if needed. ODISE is heavy; bump `--time` / `--mem` on `instances20` if jobs OOM or time out.
 
 Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Recreate it with `bash scripts/make_env.sh` after `module load shared python311 pytorch-py311-cuda12.1-gcc11/2.2.0` so the venv can see cluster torch (`--system-site-packages`). Do not `pip install torch` from PyPI (CPU, or NVIDIA index 403). ffmpeg comes from `module load ffmpeg` or `imageio-ffmpeg`.
