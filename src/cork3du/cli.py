@@ -1,4 +1,4 @@
-"""CLI: ingest-wtours | reconstruct | remask | run | preview."""
+"""CLI: ingest-wtours | reconstruct | remask | run | instances | preview."""
 
 from __future__ import annotations
 
@@ -90,7 +90,11 @@ def cmd_preview(args: argparse.Namespace) -> None:
 def cmd_preflight(args: argparse.Namespace) -> None:
     from .preflight import run_preflight
 
-    run_preflight(require_da3_tree=not args.skip_da3, require_sam2=not args.skip_sam2)
+    run_preflight(
+        require_da3_tree=not args.skip_da3,
+        require_sam2=not args.skip_sam2,
+        require_odise=args.check_odise,
+    )
     print("preflight ok")
 
 
@@ -100,22 +104,28 @@ def cmd_instances(args: argparse.Namespace) -> None:
     paths.ensure_data_dirs()
     meta = instance_scene(
         Path(args.scene),
-        sam2_root=paths.sam2_root(),
-        sam2_checkpoint=paths.sam2_checkpoint(),
-        n_keyframes=args.n_keyframes,
-        min_depth_frac=args.min_depth_frac,
-        max_dyn_frac=args.max_dyn_frac,
-        write_amg_debug=not args.no_amg_debug,
+        odise_root=paths.odise_root(),
+        vocab=args.vocab or None,
+        label_sets=args.label or None,
+        frame_stride=args.frame_stride,
+        spatial_stride=args.spatial_stride,
+        write_debug=not args.no_debug,
     )
-    summary = {k: meta[k] for k in meta if k not in ("instances", "amg_debug")}
+    summary = {k: meta[k] for k in meta if k not in ("instances", "odise_debug")}
     print(json.dumps(summary, indent=2, default=str))
-    if meta.get("amg_debug"):
-        print(f"amg_debug: {Path(args.scene) / 'instances' / 'amg_debug'} ({len(meta['amg_debug'])} frames)")
+    if meta.get("odise_debug"):
+        print(
+            f"odise_debug: {Path(args.scene) / 'instances' / 'odise_debug'} "
+            f"({len(meta['odise_debug'])} frames)"
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
     _log()
-    parser = argparse.ArgumentParser(prog="3du", description="DA3 + residual 2s 40/40 static reconstruction")
+    parser = argparse.ArgumentParser(
+        prog="3du",
+        description="DA3 geometry + residual remask + ODISE open-vocab 3D instances",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("ingest-wtours", help="Download Walking Tours section and split 20s chunks")
@@ -147,27 +157,37 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--scene", required=True)
     p.set_defaults(func=cmd_preview)
 
-    p = sub.add_parser("preflight", help="Import-check DA3/SAM2/RAFT deps before a GPU job")
+    p = sub.add_parser("preflight", help="Import-check DA3/SAM2/ODISE/RAFT deps before a GPU job")
     p.add_argument("--skip-da3", action="store_true")
     p.add_argument("--skip-sam2", action="store_true")
+    p.add_argument("--check-odise", action="store_true", help="Also require detectron2 + ODISE")
     p.set_defaults(func=cmd_preflight)
 
-    p = sub.add_parser("instances", help="SAM2 AMG + superpoint lift → 3D instances (Stage 3–4)")
+    p = sub.add_parser(
+        "instances",
+        help="ODISE open-vocab panoptic → depth/pose unproject → labeled 3D cloud",
+    )
     p.add_argument("--scene", required=True)
-    p.add_argument("--n-keyframes", type=int, default=8)
     p.add_argument(
-        "--max-dyn-frac",
-        type=float,
-        default=1.0,
-        help="Drop AMG mask if dynamic remask overlap exceeds this (default 1.0 = keep all)",
+        "--vocab",
+        default="",
+        help="Extra open-vocab groups: 'truck, pickup; bicycle' (synonyms comma-separated, classes ';')",
     )
     p.add_argument(
-        "--min-depth-frac",
-        type=float,
-        default=0.0,
-        help="Drop AMG mask if valid-depth fraction is below this (default 0.0 = keep all)",
+        "--label",
+        nargs="+",
+        choices=["COCO", "ADE", "LVIS"],
+        default=["COCO", "ADE", "LVIS"],
+        help="Built-in label sets (default: all three)",
     )
-    p.add_argument("--no-amg-debug", action="store_true", help="Skip AMG vs remask debug PNGs")
+    p.add_argument(
+        "--frame-stride",
+        type=int,
+        default=4,
+        help="Run ODISE every Nth DA3 frame (default 4; use 1 for densest)",
+    )
+    p.add_argument("--spatial-stride", type=int, default=2, help="Pixel stride when unprojecting")
+    p.add_argument("--no-debug", action="store_true", help="Skip ODISE RGB|panoptic debug PNGs")
     p.set_defaults(func=cmd_instances)
 
     args = parser.parse_args(argv)

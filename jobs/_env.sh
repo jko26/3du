@@ -15,7 +15,8 @@ export CORK3DU_WEIGHTS="${CORK3DU_WEIGHTS:-$CORK3DU_DATA/weights}"
 export CORK3DU_DA3="${CORK3DU_DA3:-$CORK3DU_ROOT/third_party/Depth-Anything-3}"
 export CORK3DU_SAM2="${CORK3DU_SAM2:-$CORK3DU_ROOT/third_party/sam2}"
 export CORK3DU_SAM2_CKPT="${CORK3DU_SAM2_CKPT:-$CORK3DU_WEIGHTS/sam2.1_hiera_large.pt}"
-export PYTHONPATH="${CORK3DU_DA3}/src:${CORK3DU_DA3}/da3_streaming:${CORK3DU_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
+export CORK3DU_ODISE="${CORK3DU_ODISE:-$CORK3DU_ROOT/third_party/ODISE}"
+export PYTHONPATH="${CORK3DU_DA3}/src:${CORK3DU_DA3}/da3_streaming:${CORK3DU_ODISE}:${CORK3DU_ODISE}/third_party/Mask2Former:${CORK3DU_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 mkdir -p "$CORK3DU_ROOT/logs" "$CORK3DU_DATA"/{chunks,scenes,weights,logs}
 

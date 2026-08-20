@@ -78,8 +78,10 @@ def check_runtime_imports(
     *,
     da3_repo: Path | None = None,
     sam2_root: Path | None = None,
+    odise_root: Path | None = None,
     require_da3_tree: bool = True,
     require_sam2: bool = True,
+    require_odise: bool = False,
 ) -> list[str]:
     missing: list[str] = []
 
@@ -97,9 +99,15 @@ def check_runtime_imports(
 
     da3_repo = da3_repo or paths.da3_root()
     sam2_root = sam2_root or paths.sam2_root()
+    odise_root = odise_root or paths.odise_root()
     _ensure_sys_path(*[Path(p) for p in da3_pythonpath(da3_repo)])
     if sam2_root.is_dir():
         _ensure_sys_path(sam2_root)
+    if odise_root.is_dir():
+        _ensure_sys_path(odise_root)
+        m2f = odise_root / "third_party" / "Mask2Former"
+        if m2f.is_dir():
+            _ensure_sys_path(m2f)
 
     if require_da3_tree:
         if not (da3_repo / "da3_streaming" / "da3_streaming.py").is_file():
@@ -125,13 +133,29 @@ def check_runtime_imports(
         if not ckpt.is_file():
             missing.append(f"SAM2 checkpoint missing: {ckpt}")
 
+    if require_odise:
+        if not (odise_root / "odise").is_dir():
+            missing.append(f"ODISE clone missing at {odise_root} (bash scripts/setup.sh)")
+        else:
+            for mod in ("detectron2", "odise", "mask2former"):
+                try:
+                    importlib.import_module(mod)
+                except Exception as exc:
+                    missing.append(f"{mod}: {exc}")
+
     return missing
 
 
-def run_preflight(*, require_da3_tree: bool = True, require_sam2: bool = True) -> None:
+def run_preflight(
+    *,
+    require_da3_tree: bool = True,
+    require_sam2: bool = True,
+    require_odise: bool = False,
+) -> None:
     missing = check_runtime_imports(
         require_da3_tree=require_da3_tree,
         require_sam2=require_sam2,
+        require_odise=require_odise,
     )
     if not missing:
         logger.info("preflight ok")

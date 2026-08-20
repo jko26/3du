@@ -1,39 +1,81 @@
-"""Stage 3–4: SAM2 automatic 2D masks → SAI3D-style superpoint lift → 3D instances.
+"""Stage 3–4: ODISE open-vocab panoptic → depth/pose unprojection → labeled 3D cloud.
 
-Uses the SAM2 already in the 3du env (no Semantic-SAM / official SAI3D ScanNet stack).
-Dynamic / low-depth AMG masks are soft-filtered (loose defaults); empty-voter masks are skipped.
+RGB frames go to ODISE (semantic labels + instance masks). Each labeled pixel is
+unprojected with DA3 depth + camera pose — same geometry path as fuse_masked_cloud.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import cv2
 import numpy as np
 
-from .lift import (
-    accumulate_affinity,
-    affinity_matrix,
-    mask_depth_valid_frac,
-    mask_dynamic_overlap,
-    merge_superpoints,
-    project_points,
-    superpoints_in_mask,
-)
+from .odise_infer import OdiseModel, OdisePrediction, parse_vocab
 from .preview import write_preview_html, write_preview_png
-from .superpoints import voxel_superpoints
 
 logger = logging.getLogger(__name__)
 
-SAM2_CFG = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
-# Keep-all defaults for inspection: never drop on dyn/depth (overlap >1 impossible;
-# depth frac <0 impossible). Tighten via CLI when filtering again.
-DEFAULT_MAX_DYN_FRAC = 1.0
-DEFAULT_MIN_DEPTH_FRAC = 0.0
+def _instance_palette(n: int) -> np.ndarray:
+    rng = np.random.default_rng(0)
+    rgb = rng.random((max(n, 1), 3))
+    return (0.35 + 0.65 * rgb).astype(np.float32)
+
+
+def _overlay_panoptic(rgb: np.ndarray, pred: OdisePrediction, *, alpha: float = 0.45) -> np.ndarray:
+    if rgb.dtype != np.uint8:
+        base = np.clip(rgb, 0, 255).astype(np.uint8)
+    else:
+        base = rgb
+    out = base.astype(np.float32).copy()
+    pal = _instance_palette(max((s["id"] for s in pred.segments), default=0) + 1)
+    for seg in pred.segments:
+        sid = int(seg["id"])
+        mb = pred.panoptic == sid
+        if not np.any(mb):
+            continue
+        c = pal[sid % len(pal)].astype(np.float32) * 255.0
+        out[mb] = (1.0 - alpha) * out[mb] + alpha * c
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _panel_label(img: np.ndarray, text: str) -> np.ndarray:
+    out = img.copy()
+    cv2.rectangle(out, (0, 0), (out.shape[1], 28), (0, 0, 0), thickness=-1)
+    cv2.putText(out, text, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+    return out
+
+
+def write_odise_debug_panel(
+    rgb: np.ndarray,
+    pred: OdisePrediction,
+    *,
+    out_path: Path,
+    frame_idx: int,
+) -> Path:
+    if rgb.dtype != np.uint8:
+        rgb_u8 = np.clip(rgb, 0, 255).astype(np.uint8)
+    else:
+        rgb_u8 = rgb
+    ov = _overlay_panoptic(rgb_u8, pred)
+    n_thing = sum(1 for s in pred.segments if s.get("isthing"))
+    panels = [
+        _panel_label(rgb_u8, f"frame {frame_idx} RGB"),
+        _panel_label(ov, f"ODISE panoptic n={len(pred.segments)} things={n_thing}"),
+    ]
+    h = min(p.shape[0] for p in panels)
+    w = min(p.shape[1] for p in panels)
+    panels = [cv2.resize(p, (w, h), interpolation=cv2.INTER_AREA) for p in panels]
+    strip = np.concatenate(panels, axis=1)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out_path), cv2.cvtColor(strip, cv2.COLOR_RGB2BGR))
+    return out_path
 
 
 def _load_dynamic_masks(scene_dir: Path, n: int, h: int, w: int) -> list[np.ndarray] | None:
@@ -47,337 +89,213 @@ def _load_dynamic_masks(scene_dir: Path, n: int, h: int, w: int) -> list[np.ndar
             return None
         if m.shape != (h, w):
             m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
-        out.append((m > 127).astype(np.uint8))
+        out.append((m > 127).astype(bool))
     return out
 
 
-def _instance_palette(n: int) -> np.ndarray:
-    rng = np.random.default_rng(0)
-    rgb = rng.random((max(n, 1), 3))
-    rgb = 0.35 + 0.65 * rgb
-    return rgb.astype(np.float32)
-
-
-def _mask_palette(n: int) -> np.ndarray:
-    rng = np.random.default_rng(1)
-    return (rng.integers(40, 255, size=(max(n, 1), 3))).astype(np.uint8)
-
-
-def _overlay_masks(
-    rgb: np.ndarray,
-    masks: list[np.ndarray],
+def _unproject_labeled_frame(
     *,
-    alpha: float = 0.45,
-    colors: np.ndarray | None = None,
-) -> np.ndarray:
-    """Semi-transparent colored AMG blobs on RGB. masks may be bool HxW."""
-    out = rgb.astype(np.float32).copy()
-    if rgb.dtype != np.uint8:
-        base = np.clip(rgb, 0, 255).astype(np.uint8)
-        out = base.astype(np.float32)
-    else:
-        base = rgb
-        out = base.astype(np.float32)
-    pal = colors if colors is not None else _mask_palette(len(masks))
-    for i, m in enumerate(masks):
-        if m is None or not np.any(m):
-            continue
-        mb = m.astype(bool)
-        if mb.shape[:2] != out.shape[:2]:
-            mb = cv2.resize(mb.astype(np.uint8), (out.shape[1], out.shape[0]), interpolation=cv2.INTER_NEAREST).astype(
-                bool
-            )
-        c = pal[i % len(pal)].astype(np.float32)
-        out[mb] = (1.0 - alpha) * out[mb] + alpha * c
-    return np.clip(out, 0, 255).astype(np.uint8)
+    depth: np.ndarray,
+    conf: np.ndarray,
+    K: np.ndarray,
+    c2w: np.ndarray,
+    image: np.ndarray,
+    pred: OdisePrediction,
+    dyn_mask: np.ndarray | None,
+    next_global_id: int,
+    spatial_stride: int,
+    motion_mask_thre: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, dict[int, dict[str, Any]]]:
+    """Unproject valid pixels; return xyz, rgb, semantic, instance, conf, next_id, id_meta."""
+    from .reconstruct import _unproject_frame, resize_mask
 
+    world = _unproject_frame(depth, K, c2w.astype(np.float32))
+    h, w = depth.shape
+    pan = pred.panoptic
+    if pan.shape != (h, w):
+        pan = cv2.resize(pan.astype(np.float32), (w, h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
 
-def _overlay_binary(rgb: np.ndarray, mask: np.ndarray | None, *, color=(0, 200, 255), alpha: float = 0.5) -> np.ndarray:
-    out = rgb.astype(np.float32).copy()
-    if mask is None or not np.any(mask):
-        return np.clip(out, 0, 255).astype(np.uint8)
-    mb = mask.astype(bool)
-    if mb.shape[:2] != out.shape[:2]:
-        mb = cv2.resize(mb.astype(np.uint8), (out.shape[1], out.shape[0]), interpolation=cv2.INTER_NEAREST).astype(bool)
-    c = np.array(color, dtype=np.float32)
-    out[mb] = (1.0 - alpha) * out[mb] + alpha * c
-    return np.clip(out, 0, 255).astype(np.uint8)
+    # Map local panoptic segment id → (global instance id, category_id, isthing, name)
+    local_to_global: dict[int, int] = {}
+    id_meta: dict[int, dict[str, Any]] = {}
+    gid = next_global_id
+    for seg in pred.segments:
+        lid = int(seg["id"])
+        local_to_global[lid] = gid
+        id_meta[gid] = {
+            "category_id": int(seg["category_id"]),
+            "name": str(seg.get("name", f"class_{seg['category_id']}")),
+            "isthing": bool(seg.get("isthing", False)),
+            "score": seg.get("score"),
+        }
+        gid += 1
 
+    sem_map = np.full((h, w), -1, dtype=np.int32)
+    inst_map = np.full((h, w), -1, dtype=np.int32)
+    for lid, g in local_to_global.items():
+        mb = pan == lid
+        sem_map[mb] = id_meta[g]["category_id"]
+        inst_map[mb] = g
 
-def _panel_label(img: np.ndarray, text: str) -> np.ndarray:
-    out = img.copy()
-    cv2.rectangle(out, (0, 0), (out.shape[1], 28), (0, 0, 0), thickness=-1)
-    cv2.putText(out, text, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
-    return out
+    pts = world[::spatial_stride, ::spatial_stride].reshape(-1, 3)
+    cols = image[::spatial_stride, ::spatial_stride].reshape(-1, 3).astype(np.float32) / 255.0
+    c = conf[::spatial_stride, ::spatial_stride].reshape(-1)
+    sem = sem_map[::spatial_stride, ::spatial_stride].reshape(-1)
+    inst = inst_map[::spatial_stride, ::spatial_stride].reshape(-1)
 
+    keep = np.isfinite(pts).all(axis=1) & (c > 0) & (pts[:, 2] != 0) & (inst >= 0)
+    if dyn_mask is not None:
+        static = resize_mask(dyn_mask.astype(np.float32), h, w) <= motion_mask_thre
+        keep = keep & static[::spatial_stride, ::spatial_stride].reshape(-1)
 
-def write_amg_debug_panel(
-    rgb: np.ndarray,
-    amg_masks: list[np.ndarray],
-    *,
-    kept_masks: list[np.ndarray],
-    dropped_dyn: list[np.ndarray],
-    dropped_depth: list[np.ndarray],
-    final_mask: np.ndarray | None,
-    out_path: Path,
-    frame_idx: int,
-    counts: dict[str, int],
-) -> Path:
-    """RGB | all AMG | kept AMG | remask final — one glanceable debug strip."""
-    if rgb.dtype != np.uint8:
-        rgb_u8 = np.clip(rgb, 0, 255).astype(np.uint8)
-    else:
-        rgb_u8 = rgb
-    all_ov = _overlay_masks(rgb_u8, amg_masks)
-    kept_ov = _overlay_masks(rgb_u8, kept_masks, colors=_mask_palette(max(len(kept_masks), 1)))
-    # dropped: red = dyn, orange = depth (draw dyn first, depth on top)
-    drop_ov = rgb_u8.astype(np.float32).copy()
-    for m in dropped_dyn:
-        mb = m.astype(bool)
-        drop_ov[mb] = 0.4 * drop_ov[mb] + 0.6 * np.array([40, 40, 220], dtype=np.float32)
-    for m in dropped_depth:
-        mb = m.astype(bool)
-        drop_ov[mb] = 0.4 * drop_ov[mb] + 0.6 * np.array([40, 160, 255], dtype=np.float32)
-    drop_ov = np.clip(drop_ov, 0, 255).astype(np.uint8)
-    final_ov = _overlay_binary(rgb_u8, final_mask, color=(0, 220, 255), alpha=0.55)
-
-    panels = [
-        _panel_label(rgb_u8, f"frame {frame_idx} RGB"),
-        _panel_label(all_ov, f"AMG all n={counts.get('sam', len(amg_masks))}"),
-        _panel_label(kept_ov, f"AMG kept n={counts.get('kept', len(kept_masks))}"),
-        _panel_label(
-            drop_ov,
-            f"dropped dyn={counts.get('drop_dyn', 0)} depth={counts.get('drop_depth', 0)}",
-        ),
-        _panel_label(final_ov, "remask final (residual+lock)"),
-    ]
-    # match heights
-    h = min(p.shape[0] for p in panels)
-    w = min(p.shape[1] for p in panels)
-    panels = [cv2.resize(p, (w, h), interpolation=cv2.INTER_AREA) for p in panels]
-    strip = np.concatenate(panels, axis=1)
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(out_path), cv2.cvtColor(strip, cv2.COLOR_RGB2BGR))
-    return out_path
-
-
-def run_sam2_amg(
-    image_rgb: np.ndarray,
-    *,
-    sam2_root: Path,
-    checkpoint: Path,
-    device: str,
-    points_per_side: int = 16,
-    pred_iou_thresh: float = 0.7,
-    stability_score_thresh: float = 0.85,
-    min_mask_region_area: int = 80,
-    max_masks: int = 40,
-) -> list[np.ndarray]:
-    import sys
-
-    import torch
-
-    if str(sam2_root) not in sys.path:
-        sys.path.insert(0, str(sam2_root))
-    from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
-    from sam2.build_sam import build_sam2
-
-    if not hasattr(run_sam2_amg, "_model"):
-        logger.info("SAM2 AMG (%s) %s", device, checkpoint)
-        model = build_sam2(SAM2_CFG, str(checkpoint), device=device)
-        run_sam2_amg._model = model  # type: ignore[attr-defined]
-        run_sam2_amg._gen = SAM2AutomaticMaskGenerator(  # type: ignore[attr-defined]
-            model,
-            points_per_side=points_per_side,
-            pred_iou_thresh=pred_iou_thresh,
-            stability_score_thresh=stability_score_thresh,
-            min_mask_region_area=min_mask_region_area,
-            crop_n_layers=0,
-        )
-    gen = run_sam2_amg._gen  # type: ignore[attr-defined]
-    img = image_rgb
-    if img.dtype != np.uint8:
-        img = np.clip(img, 0, 255).astype(np.uint8)
-    anns = gen.generate(img)
-    anns.sort(key=lambda a: float(a.get("predicted_iou", 0.0)), reverse=True)
-    masks = [np.asarray(a["segmentation"]).astype(bool) for a in anns[:max_masks]]
-    return masks
+    return pts[keep], cols[keep], sem[keep], inst[keep], c[keep], gid, id_meta
 
 
 def instance_scene(
     scene_dir: Path,
     *,
-    sam2_root: Path,
-    sam2_checkpoint: Path,
-    n_keyframes: int = 8,
-    min_depth_frac: float = DEFAULT_MIN_DEPTH_FRAC,
-    max_dyn_frac: float = DEFAULT_MAX_DYN_FRAC,
+    odise_root: Path,
+    vocab: str | None = None,
+    label_sets: Sequence[str] | None = None,
+    frame_stride: int = 4,
+    spatial_stride: int = 2,
+    conf_threshold_coef: float = 0.75,
+    max_points: int = 400_000,
     min_points: int = 80,
-    stuff_frac: float = 0.22,
-    write_amg_debug: bool = True,
+    write_debug: bool = True,
+    device: str | None = None,
 ) -> dict[str, Any]:
     from .preflight import run_preflight
-    from .reconstruct import load_stream_rgbs, read_c2w_poses, resize_mask
+    from .reconstruct import load_stream_rgbs, read_c2w_poses
 
-    run_preflight(require_da3_tree=False, require_sam2=True)
+    run_preflight(require_da3_tree=False, require_sam2=False, require_odise=True)
     scene_dir = Path(scene_dir)
     stream_out = scene_dir / "stream_out"
-    cloud_path = scene_dir / "cloud.npy"
     if not (stream_out / "results_output").is_dir():
         raise FileNotFoundError(f"missing DA3 stream_out at {stream_out} — run reconstruct first")
-    if not cloud_path.is_file():
-        raise FileNotFoundError(f"missing {cloud_path} — run remask (or reconstruct+fuse) first")
 
-    import torch
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     images, npz_files = load_stream_rgbs(stream_out)
     n = len(images)
-    h, w = images[0].shape[:2]
+    h0, w0 = images[0].shape[:2]
     poses = read_c2w_poses(stream_out / "camera_poses.txt")
     if len(poses) != n:
         raise RuntimeError(f"poses {len(poses)} != frames {n}")
 
-    cloud = np.load(cloud_path)
-    pts = cloud[:, :3].astype(np.float32)
-    cols = cloud[:, 3:6].astype(np.float32) if cloud.shape[1] >= 6 else np.full((pts.shape[0], 3), 0.7)
-    if cols.max() > 1.5:
-        cols = cols / 255.0
-    labels, sp_info = voxel_superpoints(pts, min_points=40)
-    n_sp = int(sp_info["n_superpoints"])
-    if n_sp < 2:
-        raise RuntimeError(f"too few superpoints ({n_sp}) in {scene_dir}")
+    dyn = _load_dynamic_masks(scene_dir, n, h0, w0)
+    frame_idxs = list(range(0, n, max(1, int(frame_stride))))
+    if frame_idxs[-1] != n - 1:
+        frame_idxs.append(n - 1)
 
-    # Prepare output dir early so AMG debug can land beside instances.
     out_dir = scene_dir / "instances"
     if out_dir.exists():
-        import shutil
-
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
-    debug_dir = out_dir / "amg_debug"
-    if write_amg_debug:
+    debug_dir = out_dir / "odise_debug"
+    if write_debug:
         debug_dir.mkdir(parents=True, exist_ok=True)
 
-    dyn = _load_dynamic_masks(scene_dir, n, h, w)
-    key_idxs = np.unique(np.linspace(0, n - 1, min(n_keyframes, n), dtype=int))
-    co = np.zeros((n_sp, n_sp), dtype=np.float64)
-    both = np.zeros((n_sp, n_sp), dtype=np.float64)
-    n_masks_kept = 0
-    n_masks_drop_dyn = 0
-    n_masks_drop_depth = 0
-    n_masks_no_voter = 0
+    labels = parse_vocab(vocab)
+    sets = tuple(label_sets) if label_sets else ("COCO", "ADE", "LVIS")
+
+    all_pts: list[np.ndarray] = []
+    all_cols: list[np.ndarray] = []
+    all_sem: list[np.ndarray] = []
+    all_inst: list[np.ndarray] = []
+    all_conf: list[np.ndarray] = []
+    instance_meta: dict[int, dict[str, Any]] = {}
+    next_gid = 0
     debug_paths: list[str] = []
+    n_segments = 0
 
-    for fi in key_idxs:
-        fi = int(fi)
-        data = np.load(npz_files[fi])
-        depth = data["depth"].astype(np.float32)
-        conf = data["conf"].astype(np.float32)
-        k = data["intrinsics"].astype(np.float32)
-        dh, dw = depth.shape
-        ui, vi, vis = project_points(pts, poses[fi], k, height=dh, width=dw, depth=depth)
-        visible_sps = {int(s) for s in np.unique(labels[vis & (labels >= 0)])}
+    with OdiseModel(
+        odise_root=odise_root,
+        label_sets=sets,
+        vocab=labels,
+        device=device,
+    ) as odise:
+        for fi in frame_idxs:
+            data = np.load(npz_files[fi])
+            depth = data["depth"].astype(np.float32)
+            conf = data["conf"].astype(np.float32)
+            k = data["intrinsics"].astype(np.float32)
+            rgb = images[fi]
+            dh, dw = depth.shape
+            if rgb.shape[0] != dh or rgb.shape[1] != dw:
+                rgb = cv2.resize(rgb, (dw, dh), interpolation=cv2.INTER_LINEAR)
 
-        rgb = images[fi]
-        if rgb.shape[0] != dh or rgb.shape[1] != dw:
-            rgb = cv2.resize(rgb, (dw, dh), interpolation=cv2.INTER_LINEAR)
-        masks = run_sam2_amg(rgb, sam2_root=sam2_root, checkpoint=sam2_checkpoint, device=device)
-        dyn_f = None
-        if dyn is not None:
-            dyn_f = resize_mask(dyn[fi].astype(np.float32), dh, dw) > 0.5
+            pred = odise.predict(rgb)
+            n_segments += len(pred.segments)
+            dyn_f = dyn[fi] if dyn is not None else None
+            if dyn_f is not None and dyn_f.shape != (dh, dw):
+                dyn_f = cv2.resize(dyn_f.astype(np.uint8), (dw, dh), interpolation=cv2.INTER_NEAREST).astype(bool)
 
-        voters_per_mask: list[list[int]] = []
-        kept_masks: list[np.ndarray] = []
-        dropped_dyn: list[np.ndarray] = []
-        dropped_depth: list[np.ndarray] = []
-        frame_drop_dyn = 0
-        frame_drop_depth = 0
-        frame_no_voter = 0
-        resized: list[np.ndarray] = []
-        for m in masks:
-            if m.shape != (dh, dw):
-                m = cv2.resize(m.astype(np.uint8), (dw, dh), interpolation=cv2.INTER_NEAREST).astype(bool)
-            resized.append(m)
-            if mask_dynamic_overlap(m, dyn_f, max_frac=max_dyn_frac):
-                n_masks_drop_dyn += 1
-                frame_drop_dyn += 1
-                dropped_dyn.append(m)
-                continue
-            if mask_depth_valid_frac(m, depth, conf) < min_depth_frac:
-                n_masks_drop_depth += 1
-                frame_drop_depth += 1
-                dropped_depth.append(m)
-                continue
-            voters = superpoints_in_mask(labels, vis, ui, vi, m)
-            if len(voters) >= 1:
-                voters_per_mask.append(voters)
-                kept_masks.append(m)
-                n_masks_kept += 1
-            else:
-                n_masks_no_voter += 1
-                frame_no_voter += 1
-        accumulate_affinity(n_sp, voters_per_mask, visible_sps, co, both)
-        logger.info(
-            "frame %d: sam=%d kept=%d drop_dyn=%d drop_depth=%d no_voter=%d vis_sp=%d",
-            fi,
-            len(masks),
-            len(voters_per_mask),
-            frame_drop_dyn,
-            frame_drop_depth,
-            frame_no_voter,
-            len(visible_sps),
-        )
-        if write_amg_debug:
-            dbg = write_amg_debug_panel(
-                rgb,
-                resized,
-                kept_masks=kept_masks,
-                dropped_dyn=dropped_dyn,
-                dropped_depth=dropped_depth,
-                final_mask=dyn_f,
-                out_path=debug_dir / f"frame_{fi:03d}.png",
-                frame_idx=fi,
-                counts={
-                    "sam": len(masks),
-                    "kept": len(kept_masks),
-                    "drop_dyn": frame_drop_dyn,
-                    "drop_depth": frame_drop_depth,
-                },
+            pts, cols, sem, inst, c, next_gid, id_meta = _unproject_labeled_frame(
+                depth=depth,
+                conf=conf,
+                K=k,
+                c2w=poses[fi],
+                image=rgb,
+                pred=pred,
+                dyn_mask=dyn_f,
+                next_global_id=next_gid,
+                spatial_stride=spatial_stride,
             )
-            debug_paths.append(str(dbg))
+            instance_meta.update(id_meta)
+            all_pts.append(pts)
+            all_cols.append(cols)
+            all_sem.append(sem)
+            all_inst.append(inst)
+            all_conf.append(c)
+            logger.info(
+                "frame %d: segments=%d points=%d (things=%d)",
+                fi,
+                len(pred.segments),
+                pts.shape[0],
+                sum(1 for s in pred.segments if s.get("isthing")),
+            )
+            if write_debug:
+                dbg = write_odise_debug_panel(
+                    rgb, pred, out_path=debug_dir / f"frame_{fi:03d}.png", frame_idx=fi
+                )
+                debug_paths.append(str(dbg))
 
-    aff = affinity_matrix(co, both)
-    inst_of_sp = merge_superpoints(aff, both)
-    point_inst = np.full(pts.shape[0], -1, dtype=np.int32)
-    for sp in range(n_sp):
-        point_inst[labels == sp] = int(inst_of_sp[sp])
+    if not all_pts or sum(p.shape[0] for p in all_pts) == 0:
+        raise RuntimeError(f"No labeled points after ODISE unprojection in {scene_dir}")
 
-    # compact ids after dropping tiny / stuff
+    pts = np.concatenate(all_pts, axis=0)
+    cols = np.concatenate(all_cols, axis=0)
+    sem = np.concatenate(all_sem, axis=0)
+    inst = np.concatenate(all_inst, axis=0)
+    confs = np.concatenate(all_conf, axis=0)
+
+    conf_thr = float(np.mean(confs) * conf_threshold_coef) if confs.size else 0.0
+    conf_ok = confs >= conf_thr
+    pts, cols, sem, inst = pts[conf_ok], cols[conf_ok], sem[conf_ok], inst[conf_ok]
+    if pts.shape[0] > max_points:
+        idx = np.random.default_rng(0).choice(pts.shape[0], size=max_points, replace=False)
+        pts, cols, sem, inst = pts[idx], cols[idx], sem[idx], inst[idx]
+
+    # Compact instance ids after dropping tiny regions; keep semantics.
     records: list[dict[str, Any]] = []
-    next_id = 0
     compact = np.full(pts.shape[0], -1, dtype=np.int32)
-    n_raw = int(point_inst.max()) + 1 if point_inst.max() >= 0 else 0
-    for raw in range(n_raw):
-        sel = point_inst == raw
+    next_id = 0
+    unique_inst = sorted(int(x) for x in np.unique(inst) if x >= 0)
+    for raw in unique_inst:
+        sel = inst == raw
         n_pts = int(sel.sum())
         if n_pts < min_points:
             continue
-        frac = n_pts / max(pts.shape[0], 1)
+        meta = instance_meta.get(raw, {})
         xyz = pts[sel]
-        extent = xyz.max(axis=0) - xyz.min(axis=0)
-        z_span = float(extent[2])
-        xy_span = float(np.linalg.norm(extent[:2]))
-        is_ground = z_span < 0.18 * max(xy_span, 1e-6) and xyz[:, 2].mean() < np.percentile(pts[:, 2], 25)
-        is_stuff = frac >= stuff_frac or is_ground
         rec = {
             "id": next_id,
             "n_points": n_pts,
-            "frac": float(frac),
+            "frac": float(n_pts / max(pts.shape[0], 1)),
             "centroid": xyz.mean(axis=0).tolist(),
-            "is_stuff": bool(is_stuff),
-            "is_ground": bool(is_ground),
+            "category_id": int(meta.get("category_id", -1)),
+            "name": str(meta.get("name", "unknown")),
+            "isthing": bool(meta.get("isthing", False)),
+            "score": meta.get("score"),
         }
         inst_cloud = np.concatenate([xyz, np.clip(cols[sel], 0, 1)], axis=1)
         np.save(out_dir / f"instance_{next_id:03d}.npy", inst_cloud.astype(np.float32))
@@ -385,55 +303,70 @@ def instance_scene(
         records.append(rec)
         next_id += 1
 
+    labeled = np.concatenate(
+        [
+            pts.astype(np.float32),
+            np.clip(cols.astype(np.float32), 0, 1),
+            sem.astype(np.float32)[:, None],
+            compact.astype(np.float32)[:, None],
+        ],
+        axis=1,
+    )
+    np.save(out_dir / "cloud_labeled.npy", labeled)  # (N,8) xyzrgb + semantic + instance
+    np.save(out_dir / "point_semantics.npy", sem.astype(np.int32))
     np.save(out_dir / "point_instances.npy", compact)
+
+    cat_catalog: dict[str, Any] = {}
+    for rec in records:
+        cid = rec["category_id"]
+        cat_catalog[str(cid)] = {"name": rec["name"], "isthing": rec["isthing"]}
+    for _gid, imeta in instance_meta.items():
+        cid = int(imeta["category_id"])
+        cat_catalog.setdefault(str(cid), {"name": imeta["name"], "isthing": imeta["isthing"]})
+    (out_dir / "labels.json").write_text(json.dumps(cat_catalog, indent=2) + "\n")
+
     pal = _instance_palette(max(next_id, 1))
     colored = cols.copy()
     for i in range(next_id):
         colored[compact == i] = pal[i]
     colored[compact < 0] *= 0.25
     vis_cloud = np.concatenate([pts, colored], axis=1)
-    things = [r for r in records if not r["is_stuff"]]
-    title = f"{scene_dir.name} instances ({len(things)} things / {next_id} total)"
+    things = [r for r in records if r["isthing"]]
+    title = f"{scene_dir.name} ODISE ({len(things)} things / {next_id} segments)"
     png = write_preview_png(vis_cloud, out_dir / "preview.png", title=title)
     html = write_preview_html(vis_cloud, out_dir / "preview.html", title=title)
+
     meta = {
-        "pipeline": "sam2_amg_superpoint_affinity",
+        "pipeline": "odise_panoptic_unproject",
         "n_cloud_points": int(pts.shape[0]),
-        "n_keyframes": int(len(key_idxs)),
-        "key_idxs": [int(i) for i in key_idxs],
-        "superpoints": sp_info,
-        "max_dyn_frac": float(max_dyn_frac),
-        "min_depth_frac": float(min_depth_frac),
-        "n_masks_kept": n_masks_kept,
-        "n_masks_drop_dyn": n_masks_drop_dyn,
-        "n_masks_drop_depth": n_masks_drop_depth,
-        "n_masks_no_voter": n_masks_no_voter,
+        "n_frames": int(len(frame_idxs)),
+        "frame_idxs": [int(i) for i in frame_idxs],
+        "frame_stride": int(frame_stride),
+        "spatial_stride": int(spatial_stride),
+        "conf_threshold": conf_thr,
+        "n_odise_segments_2d": int(n_segments),
         "n_instances": next_id,
         "n_things": len(things),
         "n_stuff": next_id - len(things),
         "had_dynamic_masks": dyn is not None,
-        "amg_debug": debug_paths,
+        "label_sets": list(sets),
+        "vocab": vocab,
+        "odise_debug": debug_paths,
         "instances": records,
         "preview_png": str(png),
         "preview_html": str(html),
-        "device": device,
+        "device": device or "auto",
     }
-    (out_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    (out_dir / "meta.json").write_text(json.dumps(meta, indent=2, default=str) + "\n")
     scene_meta = scene_dir / "meta.json"
     old = json.loads(scene_meta.read_text()) if scene_meta.is_file() else {}
     old["instances"] = {k: meta[k] for k in meta if k != "instances"}
     scene_meta.write_text(json.dumps(old, indent=2, default=str) + "\n")
     logger.info(
-        "instances: %d things / %d total (%d superpoints, kept=%d drop_dyn=%d drop_depth=%d no_voter=%d) → %s",
+        "ODISE instances: %d things / %d total from %d frames → %s",
         len(things),
         next_id,
-        n_sp,
-        n_masks_kept,
-        n_masks_drop_dyn,
-        n_masks_drop_depth,
-        n_masks_no_voter,
+        len(frame_idxs),
         png,
     )
-    if debug_paths:
-        logger.info("AMG debug panels: %s (%d frames)", debug_dir, len(debug_paths))
     return meta

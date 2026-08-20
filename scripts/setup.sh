@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Clone DA3 + SAM2 next to the git checkout; weights onto $CORK3DU_DATA.
-# Installs every import DA3-Streaming / SAM2 / RAFT need at module load.
+# Clone DA3 + SAM2 + ODISE next to the git checkout; weights onto $CORK3DU_DATA.
+# Installs every import DA3-Streaming / SAM2 / RAFT / ODISE need at module load.
 # Never pip-install torch, torchvision, xformers, gsplat, or numpy>=2.
 set -euo pipefail
 
@@ -10,6 +10,7 @@ export CORK3DU_DATA="${CORK3DU_DATA:-/projects/sinus_clinical_data/3du}"
 export CORK3DU_WEIGHTS="${CORK3DU_WEIGHTS:-$CORK3DU_DATA/weights}"
 export CORK3DU_DA3="${CORK3DU_DA3:-$CORK3DU_ROOT/third_party/Depth-Anything-3}"
 export CORK3DU_SAM2="${CORK3DU_SAM2:-$CORK3DU_ROOT/third_party/sam2}"
+export CORK3DU_ODISE="${CORK3DU_ODISE:-$CORK3DU_ROOT/third_party/ODISE}"
 export CORK3DU_ENV="${CORK3DU_ENV:-$CORK3DU_DATA/env}"
 CONSTRAINT="$ROOT/constraints/hpc.txt"
 
@@ -47,10 +48,15 @@ fi
 if [[ ! -d "$CORK3DU_SAM2/.git" ]]; then
   git clone --recursive https://github.com/facebookresearch/sam2.git "$CORK3DU_SAM2"
 fi
+if [[ ! -d "$CORK3DU_ODISE/.git" ]]; then
+  git clone --recursive https://github.com/NVlabs/ODISE.git "$CORK3DU_ODISE"
+else
+  git -C "$CORK3DU_ODISE" submodule update --init --recursive
+fi
 
 # Do not `pip install -e DA3` — its pyproject pulls xformers/open3d/torch.
 # PYTHONPATH=$CORK3DU_DA3/src is set in jobs/_env.sh and reconstruct.py.
-export PYTHONPATH="${CORK3DU_DA3}/src:${CORK3DU_DA3}/da3_streaming:${CORK3DU_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="${CORK3DU_DA3}/src:${CORK3DU_DA3}/da3_streaming:${CORK3DU_ODISE}:${CORK3DU_ODISE}/third_party/Mask2Former:${CORK3DU_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # SAM2's pyproject wants torch>=2.5.1 and will otherwise pip-install a
 # CPU/cu13 wheel over the cluster 2.2.0+cu121. Install deps only, then SAM2.
@@ -79,6 +85,24 @@ print("sam2 ckpt", dest, dest.stat().st_size)
 PY
 fi
 
+# --- ODISE (open-vocab panoptic). Keep cluster torch; install deps loosely. ---
+# detectron2 must match the cluster CUDA torch (do not pip-install torch).
+if ! python -c "import detectron2" 2>/dev/null; then
+  echo "installing detectron2 against cluster torch (no torch wheel)…"
+  python -m pip install --no-build-isolation --no-deps \
+    "git+https://github.com/facebookresearch/detectron2.git"
+fi
+# Mask2Former ships inside ODISE's third_party submodule.
+M2F="$CORK3DU_ODISE/third_party/Mask2Former"
+if [[ -d "$M2F" ]]; then
+  python -m pip install -e "$M2F" --no-build-isolation --no-deps || true
+fi
+python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
+  "timm>=0.6.11" "nltk>=3.6.2" "diffdist>=0.1" "open-clip-torch>=2.0.2" \
+  "stable-diffusion-sdkit>=2.1.3" || true
+# ODISE itself: --no-deps so it cannot pin omegaconf==2.1.1 / opencv / torch.
+python -m pip install -e "$CORK3DU_ODISE" --no-build-isolation --no-deps
+
 python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
   -e "$CORK3DU_ROOT" --no-build-isolation
 
@@ -86,10 +110,15 @@ python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAIN
 python -m pip install --no-deps pypose
 
 python -m cork3du preflight
+python -m cork3du preflight --check-odise --skip-da3 --skip-sam2 || {
+  echo "WARN: ODISE preflight failed — instances jobs need detectron2/odise/mask2former."
+  echo "  Re-check: python -m cork3du preflight --check-odise --skip-da3 --skip-sam2"
+}
 echo "setup ok"
 echo "  CORK3DU_ROOT=$CORK3DU_ROOT"
 echo "  CORK3DU_DATA=$CORK3DU_DATA"
 echo "  CORK3DU_DA3=$CORK3DU_DA3"
 echo "  CORK3DU_SAM2=$CORK3DU_SAM2"
+echo "  CORK3DU_ODISE=$CORK3DU_ODISE"
 echo "  SAM2_CKPT=$CKPT"
 python -c "import torch; print('  torch', torch.__version__, 'cuda', torch.version.cuda)"

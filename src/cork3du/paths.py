@@ -47,6 +47,13 @@ def sam2_checkpoint() -> Path:
     return weights_dir() / "sam2.1_hiera_large.pt"
 
 
+def odise_root() -> Path:
+    override = os.environ.get("CORK3DU_ODISE")
+    if override:
+        return Path(override).resolve()
+    return code_root() / "third_party" / "ODISE"
+
+
 def da3_weights_dir() -> Path:
     return weights_dir() / "da3_nested_giant_large_1_1"
 

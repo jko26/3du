@@ -10,3 +10,6 @@ max_points: 400000
 conf_threshold_coef: 0.75
 da3_hf_repo: depth-anything/DA3NESTED-GIANT-LARGE-1.1
 sam2_checkpoint: sam2.1_hiera_large.pt
+odise_config: configs/Panoptic/odise_label_coco_50e.py
+odise_init: odise://Panoptic/odise_label_coco_50e
+odise_frame_stride: 4

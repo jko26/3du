@@ -6,6 +6,7 @@ The Python import name is **`cork3du`** (`python -m cork3du`). The repo and data
 
 **Geometry:** DA3-Streaming (pose + depth).
 **Dynamic mask:** floored RAFT residual (`p_resid`) **or** SAM2 40/40 lock on **independent 2-second windows**. Residual-only still masks when SAM2 misses an object. No DAS3R.
+**Open-vocab instances:** ODISE panoptic (semantic labels + instance masks) → depth/pose unprojection.
 
 Lab experiments live in `../3d-understanding/`. This repo is the compact HPC pipeline.
 
@@ -43,32 +44,35 @@ sbatch jobs/wtours20.sbatch               # GPU: array 0-19; wait until ingest i
 | `jobs/setup.sbatch` | `shared` | no |
 | `jobs/ingest_wtours.sbatch` | `shared` | no |
 | `jobs/wtours20.sbatch` / `reconstruct` / `remask` / `run_scene` | `gpua100,gpuh100` (≥40GB) | yes |
-| `jobs/instances20.sbatch` | `gpua100,gpuh100` | yes (SAM2 AMG) |
+| `jobs/instances20.sbatch` | `gpua100,gpuh100` | yes (ODISE) |
 
 DA3 Nested-Giant OOMs a 16GB `gpu` card (T4/V100) at 60-view chunks. GPU jobs skip that partition. Chunk size is chosen from VRAM: 4/2 on <24GB, 12/6 on 40GB, 24/12 on 80GB.
 
-## Stage 3–4 (static 3D instances)
+## Stage 3–4 (open-vocab 3D instances)
 
-After a scene has `cloud.npy` (and ideally `masks/final_*.png` from remask):
+After a scene has DA3 `stream_out/` (and ideally `masks/final_*.png` from remask so dynamic pixels can be dropped):
 
 ```bash
-sbatch jobs/instances20.sbatch    # array 0-19; SAM2 AMG + superpoint affinity lift
+sbatch jobs/instances20.sbatch    # array 0-19; ODISE → unproject labeled pixels
 ```
 
-This is SAI3D-style (voxel superpoints + multi-view SAM co-occurrence + region grow) using the SAM2 already in the venv — not the official ScanNet/Semantic-SAM stack. By default **all AMG masks are kept** (no dyn/depth drop); masks that hit no cloud points still cannot vote. Tighten with `--max-dyn-frac` / `--min-depth-frac` if needed.
+Pipeline: RGB → ODISE open-vocabulary panoptic (COCO+ADE+LVIS by default, optional `--vocab`) → per-pixel semantic + instance ids → same depth/pose unprojection as cloud fusion. Cross-view instance ids are assigned per frame (not SAI3D affinity merge).
 
 ```
 $CORK3DU_DATA/scenes/amsterdam_000/instances/
-  instance_000.npy …     # (N,6) xyzrgb per instance
-  point_instances.npy    # per-point ids (-1 unassigned)
-  preview.png / .html    # colored by instance
-  amg_debug/frame_XXX.png  # RGB | all AMG | kept | dropped | remask final
-  meta.json              # n_things vs n_stuff (ground / huge regions)
+  cloud_labeled.npy      # (N,8) xyzrgb + semantic_id + instance_id
+  point_semantics.npy    # (N,) category ids
+  point_instances.npy    # (N,) instance ids (-1 dropped / tiny)
+  instance_000.npy …     # (M,6) xyzrgb per instance
+  labels.json            # category_id → name / isthing
+  preview.png / .html
+  odise_debug/frame_XXX.png  # RGB | panoptic overlay
+  meta.json
 ```
 
 Always `sbatch` from the clone root so `SLURM_SUBMIT_DIR/jobs/_env.sh` resolves.
 
-Per-chunk outputs:
+Per-chunk outputs (after `run` / remask):
 
 ```
 $CORK3DU_DATA/scenes/amsterdam_000/
@@ -90,6 +94,8 @@ python -m cork3du ingest-wtours --city amsterdam --n-chunks 20 --chunk-seconds 2
 python -m cork3du run --video $CORK3DU_DATA/chunks/amsterdam/000.mp4 --out $CORK3DU_DATA/scenes/amsterdam_000
 python -m cork3du remask --scene $CORK3DU_DATA/scenes/amsterdam_000
 python -m cork3du instances --scene $CORK3DU_DATA/scenes/amsterdam_000
+python -m cork3du instances --scene $CORK3DU_DATA/scenes/amsterdam_000 \
+  --vocab "bicycle, bike; canal boat" --frame-stride 2
 python -m cork3du preview --scene $CORK3DU_DATA/scenes/amsterdam_000
 ```
 
@@ -104,6 +110,6 @@ At 5 fps, a 2s window is 10 frames.
 
 ## Setup notes
 
-After `git pull`, re-run `sbatch jobs/setup.sbatch` (CPU `shared` queue — do not use a login node) so DA3-Streaming’s import-time extras (`pypose`, `evo`, `pycolmap`, `moviepy==1.0.3`, …) land in the venv. `python -m cork3du preflight` lists every missing module at once. Do not `pip install torch` / `xformers` / `numpy>=2`. DA3-Giant may OOM at 32G — bump `--mem` on the GPU sbatch header if needed.
+After `git pull`, re-run `sbatch jobs/setup.sbatch` (CPU `shared` queue — do not use a login node) so DA3-Streaming extras, SAM2, and ODISE (`detectron2`, `mask2former`, …) land in the venv. `python -m cork3du preflight` checks DA3/SAM2; `python -m cork3du preflight --check-odise --skip-da3 --skip-sam2` verifies ODISE. Do not `pip install torch` / `xformers` / `numpy>=2`. DA3-Giant may OOM at 32G — bump `--mem` on the GPU sbatch header if needed. ODISE is heavy; `instances20` uses 48G and a 4h walltime by default.
 
 Jobs activate `$CORK3DU_DATA/env` automatically (`CORK3DU_ENV`). Recreate it with `bash scripts/make_env.sh` after `module load shared python311 pytorch-py311-cuda12.1-gcc11/2.2.0` so the venv can see cluster torch (`--system-site-packages`). Do not `pip install torch` from PyPI (CPU, or NVIDIA index 403). ffmpeg comes from `module load ffmpeg` or `imageio-ffmpeg`.

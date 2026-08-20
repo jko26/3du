@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cork-3du"
 version = "0.1.0"
-description = "Static 3D reconstruction from walking-tour video: DA3 + residual 2s 40/40 track-lock."
+description = "Static 3D reconstruction from walking-tour video: DA3 + residual remask + ODISE open-vocab instances."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
