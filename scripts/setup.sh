@@ -157,6 +157,11 @@ PY
 python -m cork3du preflight
 # Fail the job if ODISE cannot import — instances20 will not work otherwise.
 python -m cork3du preflight --check-odise --skip-da3 --skip-sam2
+echo "prefetching OpenAI CLIP ViT-L-14-336 via Hugging Face (not azureedge)…"
+python - <<'PY'
+from cork3du.odise_compat import ensure_openai_clip_336
+print("clip", ensure_openai_clip_336())
+PY
 echo "setup ok"
 echo "  CORK3DU_ROOT=$CORK3DU_ROOT"
 echo "  CORK3DU_DATA=$CORK3DU_DATA"

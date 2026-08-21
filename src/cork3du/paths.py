@@ -54,6 +54,10 @@ def odise_root() -> Path:
     return code_root() / "third_party" / "ODISE"
 
 
+def clip_cache_dir() -> Path:
+    return weights_dir() / "clip"
+
+
 def da3_weights_dir() -> Path:
     return weights_dir() / "da3_nested_giant_large_1_1"
 

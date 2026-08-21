@@ -160,6 +160,9 @@ class OdiseModel:
         aug = instantiate(dataset_cfg.mapper).augmentations
 
         logger.info("Loading ODISE (%s) from %s", device, init_from)
+        from .odise_compat import ensure_openai_clip_336
+
+        ensure_openai_clip_336()
         model = instantiate_odise(cfg.model)
         model.to(device)
         ODISECheckpointer(model).load(init_from)
