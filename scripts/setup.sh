@@ -92,10 +92,12 @@ if ! python -c "import detectron2" 2>/dev/null; then
   python -m pip install --no-build-isolation --no-deps \
     "git+https://github.com/facebookresearch/detectron2.git"
 fi
-# detectron2 runtime extras (still no torch).
+# detectron2 runtime extras. fvcore pins iopath<0.1.10 which fights SAM2's
+# iopath>=0.1.10 — install fvcore --no-deps; keep our newer iopath.
+python -m pip install --no-deps "fvcore==0.1.5.post20221221"
 python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
-  "fvcore>=0.1.5,<0.1.6" "cloudpickle" "termcolor>=1.1" "yacs>=0.1.8" \
-  "pycocotools>=2.0.2" "tabulate" "Pillow" "matplotlib"
+  "cloudpickle" "termcolor>=1.1" "yacs>=0.1.8" "pycocotools>=2.0.2" \
+  "tabulate" "Pillow" "matplotlib"
 
 # ODISE + sdkit: --no-deps so they cannot pin einops==0.3 / omegaconf==2.1.1.
 python -m pip install -e "$CORK3DU_ODISE" --no-build-isolation --no-deps
@@ -115,6 +117,8 @@ echo "healing einops / omegaconf / hydra after ODISE install…"
 python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
   "einops>=0.8,<1" "omegaconf>=2.2,<2.4" "hydra-core>=1.3.2" \
   "antlr4-python3-runtime==4.9.*" "iopath>=0.1.10"
+# Re-assert fvcore after any resolver churn (still --no-deps for iopath).
+python -m pip install --no-deps "fvcore==0.1.5.post20221221"
 
 python - <<'PY'
 import einops
@@ -122,13 +126,14 @@ from einops import einsum  # noqa: F401 — DA3 needs this; fails on einops 0.3
 print("einops", einops.__version__, "ok (has einsum)")
 import omegaconf
 print("omegaconf", omegaconf.__version__)
+import fvcore
+import detectron2
+print("fvcore", getattr(fvcore, "__version__", "?"), "detectron2 ok")
 PY
 
 python -m cork3du preflight
-python -m cork3du preflight --check-odise --skip-da3 --skip-sam2 || {
-  echo "WARN: ODISE preflight failed — instances jobs need detectron2/odise/mask2former."
-  echo "  Re-check: python -m cork3du preflight --check-odise --skip-da3 --skip-sam2"
-}
+# Fail the job if ODISE cannot import — instances20 will not work otherwise.
+python -m cork3du preflight --check-odise --skip-da3 --skip-sam2
 echo "setup ok"
 echo "  CORK3DU_ROOT=$CORK3DU_ROOT"
 echo "  CORK3DU_DATA=$CORK3DU_DATA"

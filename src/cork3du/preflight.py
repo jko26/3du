@@ -143,7 +143,7 @@ def check_runtime_imports(
         if not (odise_root / "odise").is_dir():
             missing.append(f"ODISE clone missing at {odise_root} (bash scripts/setup.sh)")
         else:
-            for mod in ("detectron2", "odise", "mask2former"):
+            for mod in ("fvcore", "detectron2", "odise", "mask2former"):
                 try:
                     importlib.import_module(mod)
                 except Exception as exc:
