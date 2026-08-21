@@ -97,7 +97,14 @@ fi
 python -m pip install --no-deps "fvcore==0.1.5.post20221221"
 python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
   "cloudpickle" "termcolor>=1.1" "yacs>=0.1.8" "pycocotools>=2.0.2" \
-  "tabulate" "Pillow" "matplotlib"
+  "tabulate" "Pillow" "matplotlib" "boto3>=1.21.25"
+
+# ODISE dataset utils (not on PyPI as named packages). --no-deps so they
+# cannot fight opencv / numpy pins.
+python -m pip install --no-build-isolation --no-deps \
+  "git+https://github.com/cocodataset/panopticapi.git"
+python -m pip install --no-build-isolation --no-deps \
+  "git+https://github.com/lvis-dataset/lvis-api.git" || true
 
 # ODISE + sdkit: --no-deps so they cannot pin einops==0.3 / omegaconf==2.1.1.
 python -m pip install -e "$CORK3DU_ODISE" --no-build-isolation --no-deps
@@ -128,7 +135,9 @@ import omegaconf
 print("omegaconf", omegaconf.__version__)
 import fvcore
 import detectron2
-print("fvcore", getattr(fvcore, "__version__", "?"), "detectron2 ok")
+from panopticapi.utils import rgb2id  # noqa: F401
+from odise.data import get_openseg_labels  # noqa: F401
+print("fvcore", getattr(fvcore, "__version__", "?"), "detectron2+odise.data ok")
 PY
 
 python -m cork3du preflight
