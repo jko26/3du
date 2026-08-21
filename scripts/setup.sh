@@ -85,7 +85,21 @@ print("sam2 ckpt", dest, dest.stat().st_size)
 PY
 fi
 
-# --- ODISE (open-vocab panoptic). Never let its resolver downgrade DA3/SAM2 pins. ---
+# Patch ODISE for PyTorch 2.x (torch._six removed). Also shim at runtime.
+python - <<PY
+from pathlib import Path
+import os
+root = Path(os.environ["CORK3DU_ODISE"])
+loop = root / "odise" / "engine" / "train_loop.py"
+if loop.is_file():
+    text = loop.read_text()
+    new = text.replace("from torch._six import inf", "from torch import inf")
+    if new != text:
+        loop.write_text(new)
+        print("patched", loop, "torch._six → torch.inf")
+    else:
+        print("ODISE train_loop already patched or no torch._six import")
+PY
 # detectron2 against cluster torch (no torch wheel).
 if ! python -c "import detectron2" 2>/dev/null; then
   echo "installing detectron2 against cluster torch (no torch wheel)…"
@@ -128,16 +142,16 @@ python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAIN
 python -m pip install --no-deps "fvcore==0.1.5.post20221221"
 
 python - <<'PY'
+from cork3du.odise_compat import probe_odise_imports
 import einops
-from einops import einsum  # noqa: F401 — DA3 needs this; fails on einops 0.3
+from einops import einsum  # noqa: F401
 print("einops", einops.__version__, "ok (has einsum)")
 import omegaconf
 print("omegaconf", omegaconf.__version__)
-import fvcore
-import detectron2
-from panopticapi.utils import rgb2id  # noqa: F401
-from odise.data import get_openseg_labels  # noqa: F401
-print("fvcore", getattr(fvcore, "__version__", "?"), "detectron2+odise.data ok")
+miss = probe_odise_imports()
+if miss:
+    raise SystemExit("ODISE import probe failed:\n  " + "\n  ".join(miss))
+print("ODISE import probe ok (same stack as instances)")
 PY
 
 python -m cork3du preflight

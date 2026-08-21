@@ -52,6 +52,10 @@ class OdiseModel:
         from detectron2.evaluation import inference_context
         from contextlib import ExitStack
 
+        from .odise_compat import prepare_odise
+
+        prepare_odise(odise_root)
+
         from odise.checkpoint import ODISECheckpointer
         from odise.config import instantiate_odise
         from odise.data import get_openseg_labels

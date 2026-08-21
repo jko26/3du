@@ -143,24 +143,9 @@ def check_runtime_imports(
         if not (odise_root / "odise").is_dir():
             missing.append(f"ODISE clone missing at {odise_root} (bash scripts/setup.sh)")
         else:
-            # Import the same stack instances/OdiseModel loads — `import odise`
-            # succeeds without touching odise.data (needs panopticapi).
-            for mod in (
-                "fvcore",
-                "detectron2",
-                "detectron2.config",
-                "mask2former",
-                "mask2former.data.datasets.register_ade20k_panoptic",
-                "panopticapi.utils",
-                "odise",
-                "odise.data",
-                "odise.config",
-                "odise.checkpoint",
-            ):
-                try:
-                    importlib.import_module(mod)
-                except Exception as exc:
-                    missing.append(f"{mod}: {exc}")
+            from .odise_compat import probe_odise_imports
+
+            missing.extend(probe_odise_imports())
 
     return missing
 
