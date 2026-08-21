@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=3du_setup
-#SBATCH --partition=gpu,gpua100,gpuh100
-#SBATCH --gres=gpu:1
+#SBATCH --partition=cpu
 #SBATCH --time=02:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -11,6 +10,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=jko26@jh.edu
 
-# Clone, pip, checkpoints. Submit from the clone root: mkdir -p logs && sbatch jobs/setup.sbatch
+# CPU only (no GPU). If partition=cpu is rejected, override:
+#   sbatch -p YOUR_CPU_PARTITION jobs/setup.sbatch
+# Submit from the clone root: mkdir -p logs && sbatch jobs/setup.sbatch
 source "${SLURM_SUBMIT_DIR:-.}/jobs/_env.sh"
 bash scripts/setup.sh

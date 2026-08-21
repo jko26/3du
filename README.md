@@ -34,18 +34,18 @@ module load python311
 module load pytorch-py311-cuda12.1-gcc11/2.2.0
 bash scripts/make_env.sh
 
-sbatch jobs/setup.sbatch                  # clone, pip, checkpoints
-sbatch jobs/ingest_wtours.sbatch          # HF clip + 20×20s splits
-sbatch jobs/wtours20.sbatch               # array 0-19; wait until ingest is done
+sbatch jobs/setup.sbatch                  # CPU: clone, pip, checkpoints
+sbatch jobs/ingest_wtours.sbatch          # CPU: HF clip + 20×20s splits
+sbatch jobs/wtours20.sbatch               # GPU array 0-19; wait until ingest is done
 ```
 
 | Job | Partition | GPU? |
 |---|---|---|
-| `jobs/setup.sbatch` / `ingest_wtours` | `gpu,gpua100,gpuh100` | yes (`--gres=gpu:1`) |
+| `jobs/setup.sbatch` / `ingest_wtours` | `cpu` (no `--gres`) | no |
 | `jobs/wtours20.sbatch` / `reconstruct` / `remask` / `run_scene` | `gpu,gpua100,gpuh100` | yes |
 | `jobs/instances20.sbatch` | `gpu,gpua100,gpuh100` | yes (ODISE) |
 
-DA3 Nested-Giant may OOM a 16GB `gpu` card at large chunk sizes; jobs auto-shrink chunk/overlap from VRAM (4/2 on <24GB, 12/6 on 40GB, 24/12 on 80GB).
+If `cpu` is not a valid partition name on your cluster, override: `sbatch -p YOUR_CPU_PARTITION jobs/setup.sbatch`. DA3 Nested-Giant may OOM a 16GB `gpu` card at large chunk sizes; jobs auto-shrink chunk/overlap from VRAM (4/2 on <24GB, 12/6 on 40GB, 24/12 on 80GB).
 
 ## Stage 3–4 (open-vocab 3D instances)
 
