@@ -55,13 +55,13 @@ else
 fi
 
 # Do not `pip install -e DA3` — its pyproject pulls xformers/open3d/torch.
-# PYTHONPATH=$CORK3DU_DA3/src is set in jobs/_env.sh and reconstruct.py.
+# Mask2Former is on PYTHONPATH only (do not pip-install; its pins fight SAM2/hydra).
 export PYTHONPATH="${CORK3DU_DA3}/src:${CORK3DU_DA3}/da3_streaming:${CORK3DU_ODISE}:${CORK3DU_ODISE}/third_party/Mask2Former:${CORK3DU_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # SAM2's pyproject wants torch>=2.5.1 and will otherwise pip-install a
 # CPU/cu13 wheel over the cluster 2.2.0+cu121. Install deps only, then SAM2.
 python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
-  "hydra-core>=1.3.2" "iopath>=0.1.10" "omegaconf>=2.2,<2.4"
+  "hydra-core>=1.3.2" "iopath>=0.1.10" "omegaconf>=2.2,<2.4" "einops>=0.8,<1"
 export SAM2_BUILD_CUDA="${SAM2_BUILD_CUDA:-0}"
 python -m pip install -e "$CORK3DU_SAM2" --no-build-isolation --no-deps
 
@@ -85,29 +85,44 @@ print("sam2 ckpt", dest, dest.stat().st_size)
 PY
 fi
 
-# --- ODISE (open-vocab panoptic). Keep cluster torch; install deps loosely. ---
-# detectron2 must match the cluster CUDA torch (do not pip-install torch).
+# --- ODISE (open-vocab panoptic). Never let its resolver downgrade DA3/SAM2 pins. ---
+# detectron2 against cluster torch (no torch wheel).
 if ! python -c "import detectron2" 2>/dev/null; then
   echo "installing detectron2 against cluster torch (no torch wheel)…"
   python -m pip install --no-build-isolation --no-deps \
     "git+https://github.com/facebookresearch/detectron2.git"
 fi
-# Mask2Former ships inside ODISE's third_party submodule.
-M2F="$CORK3DU_ODISE/third_party/Mask2Former"
-if [[ -d "$M2F" ]]; then
-  python -m pip install -e "$M2F" --no-build-isolation --no-deps || true
-fi
+# detectron2 runtime extras (still no torch).
 python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
-  "timm>=0.6.11" "nltk>=3.6.2" "diffdist>=0.1" "open-clip-torch>=2.0.2" \
-  "stable-diffusion-sdkit>=2.1.3" || true
-# ODISE itself: --no-deps so it cannot pin omegaconf==2.1.1 / opencv / torch.
+  "fvcore>=0.1.5,<0.1.6" "cloudpickle" "termcolor>=1.1" "yacs>=0.1.8" \
+  "pycocotools>=2.0.2" "tabulate" "Pillow" "matplotlib"
+
+# ODISE + sdkit: --no-deps so they cannot pin einops==0.3 / omegaconf==2.1.1.
 python -m pip install -e "$CORK3DU_ODISE" --no-build-isolation --no-deps
+python -m pip install --no-deps "stable-diffusion-sdkit==2.1.3" || \
+  python -m pip install --no-deps "stable-diffusion-sdkit>=2.1.3"
+python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
+  "timm>=0.6.11" "nltk>=3.6.2" "diffdist>=0.1" "open-clip-torch>=2.0.2" "wandb>=0.12.11" || true
 
 python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
   -e "$CORK3DU_ROOT" --no-build-isolation
 
 # pypose depends on torch; --no-deps so pip cannot fetch a PyPI torch wheel.
 python -m pip install --no-deps pypose
+
+# Heal: ODISE/sdkit metadata still *asks* for old pins; force DA3/SAM2-compatible stack back.
+echo "healing einops / omegaconf / hydra after ODISE install…"
+python -m pip install --upgrade-strategy only-if-needed --constraint "$CONSTRAINT" \
+  "einops>=0.8,<1" "omegaconf>=2.2,<2.4" "hydra-core>=1.3.2" \
+  "antlr4-python3-runtime==4.9.*" "iopath>=0.1.10"
+
+python - <<'PY'
+import einops
+from einops import einsum  # noqa: F401 — DA3 needs this; fails on einops 0.3
+print("einops", einops.__version__, "ok (has einsum)")
+import omegaconf
+print("omegaconf", omegaconf.__version__)
+PY
 
 python -m cork3du preflight
 python -m cork3du preflight --check-odise --skip-da3 --skip-sam2 || {

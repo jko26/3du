@@ -8,7 +8,7 @@ pyyaml
 matplotlib
 huggingface_hub
 safetensors
-einops
+einops>=0.8,<1
 tqdm
 scipy
 yt-dlp

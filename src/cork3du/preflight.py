@@ -91,6 +91,12 @@ def check_runtime_imports(
         except Exception as exc:
             missing.append(f"{mod}  (pip {pip_name}): {exc}")
 
+    # DA3 imports einops.einsum; einops 0.3 (pulled by sdkit) breaks that.
+    try:
+        from einops import einsum  # noqa: F401
+    except Exception as exc:
+        missing.append(f"einops.einsum (need einops>=0.8, not 0.3 from sdkit): {exc}")
+
     for mod in TORCH_IMPORTS:
         try:
             importlib.import_module(mod)

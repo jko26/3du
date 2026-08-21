@@ -3,3 +3,10 @@ numpy<2
 numba>=0.59,<0.61
 # moviepy 2 dropped moviepy.editor, which DA3 imports at api load.
 moviepy==1.0.3
+# DA3 needs einops.einsum (added in 0.6+). ODISE/sdkit must not pin 0.3.0.
+einops>=0.8,<1
+# SAM2 / hydra need omegaconf 2.2+; ODISE asks for 2.1.1 but runs with 2.3.
+omegaconf>=2.2,<2.4
+hydra-core>=1.3.2,<1.4
+antlr4-python3-runtime==4.9.*
+iopath>=0.1.10
